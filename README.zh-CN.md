@@ -1,6 +1,6 @@
 # Agent AI Usage
 
-[English](README.md) | 简体中文 | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
+[English](README.md) | 简体中文 | [繁體中文](RREADME.zh-CNF.md) | [日本語](README.ja.md)
 
 一个原生 macOS 桌面小组件，用来同时监控 GPT / Codex 与 Claude 额度，不会遮挡正在使用的窗口。
 
