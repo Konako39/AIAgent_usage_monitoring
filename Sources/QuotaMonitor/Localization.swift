@@ -13,6 +13,7 @@ enum AcceptanceMode {
 enum AppLanguage: String, CaseIterable, Identifiable {
     case english = "en"
     case simplifiedChinese = "zh-Hans"
+    case traditionalChinese = "zh-Hant"
     case japanese = "ja"
 
     var id: String { rawValue }
@@ -21,6 +22,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         switch self {
         case .english: return "en_US"
         case .simplifiedChinese: return "zh_CN"
+        case .traditionalChinese: return "zh_TW"
         case .japanese: return "ja_JP"
         }
     }
@@ -29,6 +31,7 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         switch self {
         case .english: return "English"
         case .simplifiedChinese: return "简体中文"
+        case .traditionalChinese: return "繁體中文"
         case .japanese: return "日本語"
         }
     }
@@ -43,8 +46,89 @@ enum L10n {
 
     static func text(_ key: String, language: AppLanguage? = nil) -> String {
         let selected = language ?? currentLanguage
+        if selected == .traditionalChinese {
+            return traditionalChineseTranslations[key]
+                ?? translations[.simplifiedChinese]?[key]
+                ?? translations[.english]?[key]
+                ?? key
+        }
         return translations[selected]?[key] ?? translations[.english]?[key] ?? key
     }
+
+    private static let traditionalChineseTranslations: [String: String] = [
+        "appName": "AI 額度監控",
+        "settingsTitle": "AI 額度監控設定",
+        "syncing": "正在同步…",
+        "updatedFormat": "%@ 更新",
+        "refresh": "立即重新整理",
+        "settings": "設定…",
+        "showWidget": "將元件顯示在目前螢幕",
+        "quit": "結束 AI 額度監控",
+        "notConnectedSettings": "從選單列開啟設定",
+        "refreshFailed": "暫時無法重新整理",
+        "codexConnecting": "正在連線 Codex…",
+        "claudeNotConnected": "尚未連線 Claude",
+        "codexNotFound": "找不到 Codex 登入",
+        "malformedResponse": "無法讀取回傳的用量資料",
+        "timedOut": "連線逾時",
+        "weeklyLimit": "本週額度",
+        "dailyLimit": "每日額度",
+        "currentLimit": "目前額度",
+        "resetAt": "重設於 %@",
+        "codexConnected": "已連線 Codex",
+        "claudeDesktopOpen": "開啟 Claude Desktop 後會自動顯示",
+        "claudeAPIUsage": "Claude API 用量",
+        "claudeExpired": "Claude 登入已失效，請重新登入",
+        "threeLimits": "3 項限制",
+        "localSecureSync": "Claude Desktop · 本機安全同步",
+        "claudeConnected": "已連線 Claude",
+        "apiBudgetRequired": "請設定 Claude API 每月預算",
+        "apiKeyInvalid": "Claude Admin Key 無效或沒有權限",
+        "apiBudgetUsed": "API 每月預算 · 已使用 $%@",
+        "apiBudgetReset": "預算 $%@ · 下個月重設",
+        "fiveHours": "5 小時",
+        "thisWeek": "本週",
+        "fable": "Fable",
+        "codexConversation": "Codex 對話",
+        "claudeConversation": "Claude 對話",
+        "historyEmpty": "額度變化後會記錄任務",
+        "recentTasks": "最近任務",
+        "justNow": "剛剛",
+        "helpTooltip": "沒有顯示額度？",
+        "helpTitle": "額度沒有顯示嗎？",
+        "helpIntro": "應用程式每 30 秒重新偵測兩個服務，無需重新啟動元件。",
+        "helpGPT": "GPT / Codex：開啟 ChatGPT 或 Codex 並確認已登入，然後點選重新整理。",
+        "helpClaude": "Claude：至少開啟一次 Claude Desktop，讓它更新本機額度歷史。",
+        "helpFable": "Fable：若顯示「—」，請在設定中點選「連線 Fable 額度」完成一次官方授權。",
+        "statusReady": "已連線",
+        "statusWaiting": "等待連線",
+        "displaySection": "顯示",
+        "language": "語言",
+        "desktopWidgetMode": "桌面小工具模式",
+        "desktopWidgetDescription": "元件位於一般應用程式視窗下方，不會擋住操作。",
+        "codexSection": "GPT · Codex",
+        "codexDetected": "已使用本機 Codex 登入",
+        "codexUndetected": "未偵測到 Codex 登入",
+        "codexDescription": "無需重複輸入密碼；透過本機 Codex 唯讀介面取得每週額度。",
+        "claudeSection": "Claude 訂閱",
+        "claudeDetected": "已連線 Claude Desktop / Claude Code",
+        "claudeUndetected": "未偵測到 Claude 額度",
+        "claudePrivacy": "優先讀取 Claude Desktop 自己的額度歷史；不讀取、複製或上傳桌面工作階段 Cookie。",
+        "oauthPlaceholder": "Claude OAuth Access Token（選填）",
+        "saveSubscription": "儲存訂閱登入",
+        "connectFable": "連線 Fable 額度",
+        "openClaude": "開啟 Claude",
+        "claudeHelp": "5 小時和本週直接來自 Claude Desktop。Fable 若顯示「—」，請完成一次授權。",
+        "savedClaude": "Claude 登入已安全儲存至鑰匙圈",
+        "finishTerminalLogin": "請在終端機完成 Claude 登入，然後重新整理元件",
+        "claudeCodeMissing": "找不到 Claude Code",
+        "apiFallbackSection": "Claude API 備用模式",
+        "monthlyBudget": "每月預算（USD）",
+        "saveAPI": "儲存 API 設定",
+        "savedAPI": "API 設定已安全儲存至鑰匙圈",
+        "apiFallbackHelp": "僅在沒有 Claude 訂閱登入時使用；將官方組織 API 費用與自訂每月預算比較。",
+        "primary": "額度"
+    ]
 
     private static let translations: [AppLanguage: [String: String]] = [
         .english: [

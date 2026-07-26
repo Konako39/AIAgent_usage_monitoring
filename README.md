@@ -1,24 +1,20 @@
 # Agent AI Usage
 
-English | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
 A native macOS desktop widget for monitoring GPT / Codex and Claude usage without keeping a dashboard in front of your work.
 
-![Agent AI Usage with simulated demo data](docs/agent-ai-usage.png)
-
-> The screenshot uses the app's isolated demo mode. Every task name and percentage in it is fictional; no desktop or account data is captured.
+![Agent AI Usage](docs/agent-ai-usage.png)
 
 ## Features
 
 - Shows GPT / Codex and Claude usage in one compact native widget.
 - Claude displays 5-hour, weekly, and Fable limits at the same time.
-- Colors move from green to red as remaining usage decreases.
-- Refreshes every 30 seconds and re-detects providers after launch, so signing in later does not require an app restart.
-- Attributes quota changes to the latest Codex or Claude task.
-- Keeps up to three recent tasks per provider and shows each changed Claude window separately.
+- Refreshes and re-detects services every 30 seconds.
+- Attributes usage changes to the latest Codex or Claude task.
+- Keeps up to three recent tasks per provider; Claude shows every changed usage window separately.
 - Lives at the Finder desktop layer, behind normal application windows.
-- Includes a troubleshooting popover immediately to the left of Refresh.
-- Supports English, Simplified Chinese, and Japanese. English is the default.
+- Supports English, Simplified Chinese, Traditional Chinese, and Japanese.
 - Uses native Liquid Glass on macOS 26 and a native visual-effect fallback on earlier systems.
 
 ## Data and privacy
@@ -44,20 +40,6 @@ Credentials entered in Settings are stored in macOS Keychain. Usage history and 
 
 The signed local build is written to `dist/Agent AI Usage.app`.
 
-## Acceptance checks
-
-The repository includes a framework-free acceptance runner so it also works on Macs whose Command Line Tools do not bundle XCTest.
-
-```bash
-# Isolated fixtures: startup, delayed sign-in, history, resets, parsing, languages
-.build/release/QuotaMonitor --acceptance
-
-# The same checks plus read-only verification of this Mac's live sign-ins
-.build/release/QuotaMonitor --acceptance-live
-```
-
-The release in this repository passed all 14 checks, including both live GPT / Codex and Claude detection.
-
 ## Troubleshooting
 
 - GPT missing: open ChatGPT or Codex, confirm you are signed in, then press Refresh.
@@ -68,3 +50,5 @@ The release in this repository passed all 14 checks, including both live GPT / C
 ## License
 
 [PolyForm Noncommercial 1.0.0](LICENSE). Personal and other noncommercial use is allowed; commercial use is not licensed.
+
+Why aren't there any other providers? Because I only subscribe to GPT and Claude.

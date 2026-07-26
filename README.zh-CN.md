@@ -1,24 +1,20 @@
 # Agent AI Usage
 
-[English](README.md) | 简体中文 | [日本語](README.ja.md)
+[English](README.md) | 简体中文 | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
 一个原生 macOS 桌面小组件，用来同时监控 GPT / Codex 与 Claude 额度，不会遮挡正在使用的窗口。
 
-![使用模拟数据的 Agent AI Usage](docs/agent-ai-usage.png)
-
-> 截图来自应用的隔离演示模式。任务名称和百分比全部为虚构数据，不包含桌面或账号信息。
+![Agent AI Usage](docs/agent-ai-usage.png)
 
 ## 功能
 
 - 在一个紧凑的原生组件里显示 GPT / Codex 和 Claude 额度。
 - Claude 同时显示 5 小时、本周和 Fable 三项限制。
-- 剩余额度越多越绿，越少越红。
-- 每 30 秒刷新并重新检测服务，启动后才登录也无需重启应用。
+- 每 30 秒刷新并重新检测服务。
 - 将额度变化归因到最近的 Codex 或 Claude 任务。
 - 每家最多保留三条最近任务，Claude 会分别显示每个变化的额度窗口。
 - 位于 Finder 桌面层，普通应用窗口会盖住它。
-- 刷新按钮左侧有故障排查说明。
-- 支持英语、简体中文和日语，默认英语。
+- 支持英语、简体中文、繁体中文和日语。
 - macOS 26 使用原生 Liquid Glass，旧系统使用原生视觉效果回退。
 
 ## 数据与隐私
@@ -41,18 +37,8 @@ Fable 是模型专属限制，Claude Desktop 可能不会将它写入本地历�
 
 成品位于 `dist/Agent AI Usage.app`。
 
-## 验收
-
-```bash
-# 隔离模拟数据验收
-.build/release/QuotaMonitor --acceptance
-
-# 加上当前 Mac 真实登录的只读验证
-.build/release/QuotaMonitor --acceptance-live
-```
-
-本版本已通过全部 14 项验收，包括 GPT / Codex 和 Claude 真实冷启动读取。
-
 ## 许可证
 
 [PolyForm Noncommercial 1.0.0](LICENSE)：允许个人和其他非商业用途，不授权商业使用。
+
+为什么没有其他的？因为我只订阅了 GPT 和 Claude。

@@ -1,25 +1,21 @@
 # Agent AI Usage
 
-[English](README.md) | [简体中文](README.zh-CN.md) | 日本語
+[English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | 日本語
 
 GPT / Codex と Claude の使用量を同時に監視する、macOS ネイティブのデスクトップウィジェットです。通常のアプリウィンドウの背面に表示されます。
 
-![シミュレーションデータを使用した Agent AI Usage](docs/agent-ai-usage.png)
-
-> スクリーンショットは分離されたデモモードで生成されています。タスク名とパーセントはすべて架空で、デスクトップやアカウントデータは含まれません。
+![Agent AI Usage](docs/agent-ai-usage.png)
 
 ## 機能
 
-- GPT / Codex と Claude を 1 つのコンパクトなウィジェットに表示。
-- Claude の 5 時間、週間、Fable の上限を同時に表示。
-- 残量が多いと緑、少ないと赤に変化。
-- 30 秒ごとに更新し、起動後にログインした場合もアプリの再起動は不要。
-- 使用量の変化を最近の Codex / Claude タスクに関連付け。
-- 各プロバイダー最大 3 件の最近タスクを保存し、Claude は変化した上限を個別に表示。
-- Finder のデスクトップレベルに配置され、通常のウィンドウを妨げません。
-- 更新ボタンの左側にトラブルシューティング説明。
-- 英語、簡体中国語、日本語に対応。デフォルトは英語。
-- macOS 26 では Liquid Glass、以前のシステムではネイティブの視覚効果を使用。
+- GPT / Codex と Claude の使用量を 1 つのコンパクトなネイティブウィジェットに表示。
+- Claude の 5 時間、週間、Fable の 3 つの上限を同時に表示。
+- 30 秒ごとに更新し、サービスを再検出。
+- 使用量の変化を最近の Codex または Claude タスクに関連付け。
+- 各サービスで最大 3 件の最近タスクを保存し、Claude は変化した各使用量ウィンドウを個別に表示。
+- Finder のデスクトップレベルに配置され、通常のアプリウィンドウの背面に表示。
+- 英語、簡体中国語、繁体中国語、日本語に対応。
+- macOS 26 ではネイティブ Liquid Glass、以前のシステムではネイティブ視覚効果のフォールバックを使用。
 
 ## データとプライバシー
 
@@ -41,15 +37,8 @@ Fable はモデル固有の上限で、Claude Desktop がローカル履歴に�
 
 アプリは `dist/Agent AI Usage.app` に生成されます。
 
-## 受け入れチェック
-
-```bash
-.build/release/QuotaMonitor --acceptance
-.build/release/QuotaMonitor --acceptance-live
-```
-
-このリリースは、GPT / Codex と Claude の実際のコールドスタート読み取りを含む 14 項目すべてに合格しています。
-
 ## ライセンス
 
 [PolyForm Noncommercial 1.0.0](LICENSE)。個人およびその他の非商用利用は許可されますが、商用利用は許諾されません。
+
+なぜ他のプロバイダーがないのですか？私が契約しているのは GPT と Claude だけだからです。

@@ -26,7 +26,7 @@ enum AcceptanceRunner {
         record("Default refresh interval is 30 seconds", QuotaStore.defaultRefreshInterval == 30)
         record("Default language is English", T("appName", language: .english) == "Agent AI Usage")
         record(
-            "English, Simplified Chinese, and Japanese have troubleshooting copy",
+            "All four interface languages have troubleshooting copy",
             AppLanguage.allCases.allSatisfy { T("helpTitle", language: $0) != "helpTitle" }
         )
 
