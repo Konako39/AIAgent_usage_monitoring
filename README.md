@@ -1,6 +1,6 @@
 # Agent AI Usage
 
-English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
+English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-CNF.md) | [日本語](README.ja.md)
 
 A native macOS desktop widget for monitoring GPT / Codex and Claude usage without keeping a dashboard in front of your work.
 
