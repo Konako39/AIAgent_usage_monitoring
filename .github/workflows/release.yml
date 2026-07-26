@@ -1,0 +1,58 @@
+name: Release macOS app
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build app
+        run: ./build.sh
+
+      - name: Run acceptance checks
+        run: .build/release/QuotaMonitor --acceptance
+
+      - name: Package DMG
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          staging_directory="$(mktemp -d)"
+          artifact="dist/Agent-AI-Usage-${version}-arm64.dmg"
+
+          ditto "dist/Agent AI Usage.app" "$staging_directory/Agent AI Usage.app"
+          ln -s /Applications "$staging_directory/Applications"
+          hdiutil create \
+            -volname "Agent AI Usage" \
+            -srcfolder "$staging_directory" \
+            -format UDZO \
+            "$artifact"
+
+          codesign --verify --deep --strict "dist/Agent AI Usage.app"
+          hdiutil verify "$artifact"
+          shasum -a 256 "$artifact" > "${artifact}.sha256"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          artifact="dist/Agent-AI-Usage-${version}-arm64.dmg"
+          notes=$'Download the DMG, open it, and drag Agent AI Usage to Applications.\n\nRequires macOS 14 or later on Apple Silicon. This build is ad-hoc signed and not notarized; if macOS blocks the first launch, Control-click the app and choose Open.'
+
+          gh release create "$RELEASE_TAG" \
+            "$artifact" \
+            "${artifact}.sha256" \
+            --title "Agent AI Usage ${version}" \
+            --notes "$notes"
