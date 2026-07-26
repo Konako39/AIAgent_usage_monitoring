@@ -1,6 +1,6 @@
 # Agent AI Usage
 
-[English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | 日本語
+[English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-CNF.md) | 日本語
 
 GPT / Codex と Claude の使用量を同時に監視する、macOS ネイティブのデスクトップウィジェットです。通常のアプリウィンドウの背面に表示されます。
 
