@@ -102,6 +102,32 @@ enum AcceptanceRunner {
                 && approximately(change("fable", in: mergedEvent), 2)
         )
 
+        let migrationDefaults = isolatedDefaults()
+        UsageHistory.save([
+            UsageEvent(
+                id: UUID(),
+                taskName: "Legacy Claude task",
+                consumed: 1,
+                date: start,
+                changes: nil
+            )
+        ], provider: "claude", defaults: migrationDefaults)
+        let migrationStore = QuotaStore(autoStart: false, defaults: migrationDefaults)
+        migrationStore.apply(
+            ProviderPoll(snapshot: claudeSnapshot(fiveHour: 90, weekly: 70, fable: 80), taskName: "Baseline"),
+            provider: "claude",
+            now: start
+        )
+        migrationStore.apply(
+            ProviderPoll(snapshot: claudeSnapshot(fiveHour: 89, weekly: 69.5, fable: 80), taskName: "Legacy Claude task"),
+            provider: "claude",
+            now: start.addingTimeInterval(60)
+        )
+        record(
+            "Legacy aggregate Claude history does not create an unlabeled pill",
+            migrationStore.claudeEvents.first?.changes?.allSatisfy { $0.limitID != "primary" } == true
+        )
+
         let resetStore = QuotaStore(autoStart: false, defaults: isolatedDefaults())
         resetStore.apply(
             ProviderPoll(snapshot: claudeSnapshot(fiveHour: 12, weekly: 30, fable: 20), taskName: "Before reset"),

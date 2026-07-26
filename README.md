@@ -56,7 +56,7 @@ The repository includes a framework-free acceptance runner so it also works on M
 .build/release/QuotaMonitor --acceptance-live
 ```
 
-The release in this repository passed all 13 checks, including both live GPT / Codex and Claude detection.
+The release in this repository passed all 14 checks, including both live GPT / Codex and Claude detection.
 
 ## Troubleshooting
 

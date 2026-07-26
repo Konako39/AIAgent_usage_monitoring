@@ -48,7 +48,7 @@ Fable はモデル固有の上限で、Claude Desktop がローカル履歴に�
 .build/release/QuotaMonitor --acceptance-live
 ```
 
-このリリースは、GPT / Codex と Claude の実際のコールドスタート読み取りを含む 13 項目すべてに合格しています。
+このリリースは、GPT / Codex と Claude の実際のコールドスタート読み取りを含む 14 項目すべてに合格しています。
 
 ## ライセンス
 

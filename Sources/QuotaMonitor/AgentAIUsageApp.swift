@@ -155,9 +155,18 @@ final class QuotaStore: ObservableObject {
         if !events.isEmpty,
            events[0].taskName == title,
            now.timeIntervalSince(events[0].date) < 15 * 60 {
-            events[0].changes = merge(events[0].changes ?? [
-                UsageChange(limitID: "primary", consumed: events[0].consumed)
-            ], with: changes)
+            let existingChanges: [UsageChange]
+            if let stored = events[0].changes {
+                existingChanges = stored
+            } else if changes.contains(where: { $0.limitID == "primary" }) {
+                existingChanges = [UsageChange(limitID: "primary", consumed: events[0].consumed)]
+            } else {
+                // Legacy Claude events had one aggregate value. It cannot be
+                // assigned safely to a specific modern window, so do not show
+                // it as an extra unlabeled pill when new per-window data arrives.
+                existingChanges = []
+            }
+            events[0].changes = merge(existingChanges, with: changes)
             events[0].consumed = events[0].changes?.map(\.consumed).max() ?? events[0].consumed
             events[0].date = now
         } else {

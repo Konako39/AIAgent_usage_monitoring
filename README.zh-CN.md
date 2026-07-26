@@ -51,7 +51,7 @@ Fable 是模型专属限制，Claude Desktop 可能不会将它写入本地历�
 .build/release/QuotaMonitor --acceptance-live
 ```
 
-本版本已通过全部 13 项验收，包括 GPT / Codex 和 Claude 真实冷启动读取。
+本版本已通过全部 14 项验收，包括 GPT / Codex 和 Claude 真实冷启动读取。
 
 ## 许可证
 
