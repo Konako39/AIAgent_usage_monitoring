@@ -109,7 +109,10 @@ enum AcceptanceRunner {
                 taskName: "Legacy Claude task",
                 consumed: 1,
                 date: start,
-                changes: nil
+                changes: [
+                    UsageChange(limitID: "primary", consumed: 1),
+                    UsageChange(limitID: "five_hour", consumed: 0.2)
+                ]
             )
         ], provider: "claude", defaults: migrationDefaults)
         let migrationStore = QuotaStore(autoStart: false, defaults: migrationDefaults)

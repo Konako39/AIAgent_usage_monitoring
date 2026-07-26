@@ -50,7 +50,16 @@ enum UsageHistory {
               let events = try? JSONDecoder().decode([UsageEvent].self, from: data) else {
             return []
         }
-        return Array(events.prefix(3))
+        let normalized = events.map { event -> UsageEvent in
+            var event = event
+            if let changes = event.changes,
+               changes.contains(where: { $0.limitID != "primary" }) {
+                event.changes = changes.filter { $0.limitID != "primary" }
+                event.consumed = event.changes?.map(\.consumed).max() ?? event.consumed
+            }
+            return event
+        }
+        return Array(normalized.prefix(3))
     }
 
     static func save(_ events: [UsageEvent], provider: String, defaults: UserDefaults = .standard) {
