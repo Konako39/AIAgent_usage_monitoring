@@ -16,6 +16,7 @@
 - 监测 Tibo（`@thsottiaux`）的新推文，可交给 OpenAI、Claude、Gemini 或 DeepSeek 判断是否可能预示 GPT / Codex 额度重置。
 - 支持通过 Base URL、可选 API Key 和动态模型列表连接自定义 OpenAI-compatible 接口。
 - 在 GPT 任务下方显示最新推文和简洁 AI 结论；可能重置时 GPT 卡片变为绿色边框，点击一次即复原。
+- 可为 Tibo 和 AI 流量启用自定义 HTTP/Mixed 代理，默认填入 Clash 常见的 `127.0.0.1:7890`，端口可编辑并可测试连接。
 - 位于 Finder 桌面层，普通应用窗口会盖住它。
 - 支持英语、简体中文、繁体中文和日语。
 - macOS 26 使用原生 Liquid Glass，旧系统使用原生视觉效果回退。
@@ -26,7 +27,7 @@ GPT / Codex 额度来自本机 Codex 只读 app-server 接口。Claude 的 5 小
 
 Fable 是模型专属限制，Claude Desktop 可能不会将它写入本地历史。如果显示 `—`，请在设置中点击“连接 Fable 额度”完成一次 Claude Code 官方授权。也可选择使用 Anthropic Admin API Key 与自定义月预算。
 
-默认情况下，Tibo 监测只需要公开主页链接 `https://x.com/thsottiaux`，无需 X 开发者凭证。它会并行尝试 X 的公开嵌入时间线和备用只读服务。当两条公开通道都不可用时，仍可在高级选项中使用 X API Bearer Token。
+默认情况下，Tibo 监测只需要公开主页链接 `https://x.com/thsottiaux`，无需 X 开发者凭证。它会并行尝试 X 公开主页、公开嵌入时间线和备用只读服务。当这些公开通道都不可用时，仍可在高级选项中使用 X API Bearer Token。
 
 可选择 OpenAI、Claude、Gemini、DeepSeek 或自定义 OpenAI-compatible 接口，输入必要的 API 信息，测试连接以加载可用模型，然后选择模型。自定义接口可填写 `https://api.example.com/v1` 这样的 Base URL；LM Studio 等本机服务可使用 `http://localhost`。自动检测每 2 分钟执行一次，星光按钮可立即重新分析最新推文。
 
@@ -49,7 +50,8 @@ Fable 是模型专属限制，Claude Desktop 可能不会将它写入本地历�
 - GPT 未显示：打开 ChatGPT 或 Codex，确认已登录，然后点击刷新。
 - Claude 未显示：打开一次 Claude Desktop，让它更新本地额度历史。
 - Fable 未显示：使用“设置 → 连接 Fable 额度”。
-- Tibo 分析未显示：在设置中测试公开主页和 AI 模型，然后点击星光按钮。如果两条公开通道都提示连接失败，请检查网络或 VPN，稍后重试，或改用官方 X API。
+- Tibo 分析未显示：在设置中测试公开主页和 AI 模型，然后点击星光按钮。如果公开通道提示连接失败，请检查网络、VPN 或代理，稍后重试，或改用官方 X API。
+- Clash 已运行但 X 仍连接失败：在 Tibo 设置中开启自定义代理，保留 `127.0.0.1:7890` 或填入 Clash 当前的 HTTP/Mixed 端口，先点“测试代理”，再点“测试公开主页”。
 - 小组件不见了：使用菜单栏项“在此显示器显示小组件”。
 
 ## 许可证

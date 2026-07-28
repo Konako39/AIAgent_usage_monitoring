@@ -1,4 +1,5 @@
 import Foundation
+import CFNetwork
 
 @MainActor
 enum AcceptanceRunner {
@@ -10,7 +11,7 @@ enum AcceptanceRunner {
         var detail: String
     }
 
-    static func run(includeLiveProviders: Bool) async -> Bool {
+    static func run(includeLiveProviders: Bool, includeLiveProxy: Bool = false) async -> Bool {
         temporarySuites.removeAll()
         defer {
             for suite in temporarySuites {
@@ -39,6 +40,8 @@ enum AcceptanceRunner {
                     && T("tiboPublicSourcesUnavailable", language: $0) != "tiboPublicSourcesUnavailable"
                     && T("tiboTestingProfile", language: $0) != "tiboTestingProfile"
                     && T("tiboKeychainOnDemand", language: $0) != "tiboKeychainOnDemand"
+                    && T("tiboUseProxy", language: $0) != "tiboUseProxy"
+                    && T("tiboProxyConnected", language: $0) != "tiboProxyConnected"
             }
         )
 
@@ -97,6 +100,52 @@ enum AcceptanceRunner {
                     && readerTweet.text == "A possible usage refresh is coming."
                     && readerTweet.createdAt != nil
             )
+
+            let directProfile = """
+            <article data-tweet-id="1900000000000000000">
+              <meta content="Older post" itemProp="articleBody"/>
+              <meta content="2026-07-27T01:00:00.000Z" itemProp="datePublished"/>
+            </article>
+            <article data-tweet-id="2000000000000000000">
+              <meta itemProp="articleBody" content="Latest &amp; relevant &#x27;post&#x27;"/>
+              <meta itemProp="datePublished" content="2026-07-28T03:00:00.000Z"/>
+            </article>
+            """
+            let directTweet = try TiboMonitorService.parseDirectProfile(
+                Data(directProfile.utf8),
+                screenName: "thsottiaux"
+            )
+            record(
+                "The direct X profile fallback selects and decodes the newest post",
+                directTweet.id == "2000000000000000000"
+                    && directTweet.text == "Latest & relevant 'post'"
+                    && directTweet.createdAt != nil
+            )
+
+            let proxyDefaults = isolatedDefaults()
+            proxyDefaults.set(true, forKey: TiboNetworkProxy.enabledKey)
+            proxyDefaults.set("127.0.0.1", forKey: TiboNetworkProxy.hostKey)
+            proxyDefaults.set(7_890, forKey: TiboNetworkProxy.portKey)
+            let proxyDictionary = try TiboNetworkProxy.configuration(defaults: proxyDefaults)
+                .connectionProxyDictionary
+            let configuredPort = (proxyDictionary?[kCFNetworkProxiesHTTPSPort as String] as? NSNumber)?.intValue
+            let proxyExceptions = proxyDictionary?[kCFNetworkProxiesExceptionsList as String] as? [String]
+            record(
+                "A Clash HTTP/Mixed proxy is applied to HTTP and HTTPS traffic",
+                proxyDictionary?[kCFNetworkProxiesHTTPProxy as String] as? String == "127.0.0.1"
+                    && proxyDictionary?[kCFNetworkProxiesHTTPSProxy as String] as? String == "127.0.0.1"
+                    && configuredPort == 7_890
+                    && proxyExceptions?.contains("localhost") == true
+            )
+
+            proxyDefaults.set("https://127.0.0.1", forKey: TiboNetworkProxy.hostKey)
+            var rejectedInvalidProxy = false
+            do {
+                _ = try TiboNetworkProxy.configuration(defaults: proxyDefaults)
+            } catch TiboMonitorError.invalidProxy {
+                rejectedInvalidProxy = true
+            }
+            record("Invalid proxy addresses are rejected before connecting", rejectedInvalidProxy)
 
             let analysisJSON = """
             ```json
@@ -380,6 +429,27 @@ enum AcceptanceRunner {
                 live.1.snapshot.connected && !live.1.snapshot.limits.isEmpty,
                 live.1.snapshot.resetText
             )
+        }
+
+        if includeLiveProxy {
+            let proxyDefaults = isolatedDefaults()
+            proxyDefaults.set(true, forKey: TiboNetworkProxy.enabledKey)
+            proxyDefaults.set(TiboNetworkProxy.defaultHost, forKey: TiboNetworkProxy.hostKey)
+            proxyDefaults.set(TiboNetworkProxy.defaultPort, forKey: TiboNetworkProxy.portKey)
+            do {
+                try await TiboNetworkProxy.test(defaults: proxyDefaults)
+                let tweet = try await TiboMonitorService.testPublicProfile(
+                    profileURL: TiboMonitorPersistence.defaultProfileURL,
+                    session: try TiboNetworkProxy.session(defaults: proxyDefaults)
+                )
+                record(
+                    "The live Clash proxy reads Tibo's public X profile",
+                    !tweet.id.isEmpty && !tweet.text.isEmpty,
+                    tweet.text
+                )
+            } catch {
+                record("The live Clash proxy reads Tibo's public X profile", false, error.localizedDescription)
+            }
         }
 
         print("Agent AI Usage acceptance")

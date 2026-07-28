@@ -1737,6 +1737,9 @@ struct SettingsView: View {
     @AppStorage(TiboMonitorPersistence.sourceKey) private var tiboSourceRaw = TiboPostSource.publicProfile.rawValue
     @AppStorage(TiboMonitorPersistence.profileURLKey) private var tiboProfileURL = TiboMonitorPersistence.defaultProfileURL
     @AppStorage("tiboLLMProvider") private var tiboProviderRaw = LLMProvider.openAI.rawValue
+    @AppStorage(TiboNetworkProxy.enabledKey) private var tiboProxyEnabled = false
+    @AppStorage(TiboNetworkProxy.hostKey) private var tiboProxyHost = TiboNetworkProxy.defaultHost
+    @AppStorage(TiboNetworkProxy.portKey) private var tiboProxyPort = TiboNetworkProxy.defaultPort
     @State private var oauthToken = ""
     @State private var adminKey = ""
     @State private var xBearerToken = ""
@@ -1745,6 +1748,7 @@ struct SettingsView: View {
     @State private var llmModels: [LLMModelOption] = []
     @State private var selectedLLMModel = ""
     @State private var isTestingSource = false
+    @State private var isTestingProxy = false
     @State private var isLoadingModels = false
     @State private var savedMessage = ""
     @State private var savedMessageIsError = false
@@ -1817,6 +1821,27 @@ struct SettingsView: View {
                     }
                 }
 
+                Toggle(T("tiboUseProxy", language: language), isOn: $tiboProxyEnabled)
+                if tiboProxyEnabled {
+                    HStack {
+                        TextField(T("tiboProxyHost", language: language), text: $tiboProxyHost)
+                        TextField(T("tiboProxyPort", language: language), value: $tiboProxyPort, format: .number)
+                            .frame(width: 96)
+                        Button {
+                            testTiboProxy()
+                        } label: {
+                            HStack(spacing: 6) {
+                                if isTestingProxy { ProgressView().controlSize(.small) }
+                                Text(T(isTestingProxy ? "tiboTestingProxy" : "tiboTestProxy", language: language))
+                            }
+                        }
+                        .disabled(isTestingProxy)
+                    }
+                    Text(T("tiboProxyHelp", language: language))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Picker(T("tiboModelProvider", language: language), selection: $tiboProviderRaw) {
                     ForEach(LLMProvider.allCases) { provider in
                         Text(provider.displayName).tag(provider.rawValue)
@@ -1849,7 +1874,8 @@ struct SettingsView: View {
                             let models = try await LLMService.listModels(
                                 provider: provider,
                                 apiKey: key,
-                                baseURL: baseURL
+                                baseURL: baseURL,
+                                session: try TiboNetworkProxy.session()
                             )
                             Keychain.save(key, key: provider.keychainKey)
                             if let baseURL {
@@ -1984,6 +2010,10 @@ struct SettingsView: View {
             savedMessage = ""
             savedMessageIsError = false
         }
+        .onChange(of: tiboProxyEnabled) { _, _ in
+            savedMessage = ""
+            savedMessageIsError = false
+        }
         .onChange(of: selectedLLMModel) { _, model in
             guard !model.isEmpty else { return }
             UserDefaults.standard.set(model, forKey: selectedProvider.modelDefaultsKey)
@@ -2013,20 +2043,40 @@ struct SettingsView: View {
         Task {
             defer { isTestingSource = false }
             do {
+                let session = try TiboNetworkProxy.session()
                 switch source {
                 case .publicProfile:
-                    let tweet = try await TiboMonitorService.testPublicProfile(profileURL: profileURL)
+                    let tweet = try await TiboMonitorService.testPublicProfile(
+                        profileURL: profileURL,
+                        session: session
+                    )
                     tiboProfileURL = profileURL
                     savedMessage = String(
                         format: T("tiboProfileConnected", language: language),
                         String(tweet.text.prefix(42))
                     )
                 case .officialAPI:
-                    let id = try await TiboMonitorService.testXConnection(token: token)
+                    let id = try await TiboMonitorService.testXConnection(token: token, session: session)
                     Keychain.save(token, key: "tibo.xBearerToken")
                     UserDefaults.standard.set(id, forKey: TiboMonitorPersistence.xUserIDKey)
                     savedMessage = T("tiboXConnected", language: language)
                 }
+            } catch {
+                savedMessage = error.localizedDescription
+                savedMessageIsError = true
+            }
+        }
+    }
+
+    private func testTiboProxy() {
+        isTestingProxy = true
+        savedMessage = ""
+        savedMessageIsError = false
+        Task {
+            defer { isTestingProxy = false }
+            do {
+                try await TiboNetworkProxy.test()
+                savedMessage = T("tiboProxyConnected", language: language)
             } catch {
                 savedMessage = error.localizedDescription
                 savedMessageIsError = true
@@ -2105,7 +2155,8 @@ final class QuotaAppDelegate: NSObject, NSApplicationDelegate {
         guard AcceptanceMode.enabled else { return }
         Task { @MainActor in
             let passed = await AcceptanceRunner.run(
-                includeLiveProviders: AcceptanceMode.includesLiveProviders
+                includeLiveProviders: AcceptanceMode.includesLiveProviders,
+                includeLiveProxy: AcceptanceMode.includesLiveProxy
             )
             fflush(stdout)
             Darwin.exit(passed ? 0 : 1)

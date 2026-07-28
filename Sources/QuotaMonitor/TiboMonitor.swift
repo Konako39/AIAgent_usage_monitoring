@@ -1,4 +1,5 @@
 import Foundation
+import CFNetwork
 
 enum LLMProvider: String, CaseIterable, Codable, Identifiable {
     case openAI
@@ -89,6 +90,7 @@ enum TiboMonitorError: LocalizedError {
     case invalidCustomBaseURL
     case insecureCustomBaseURL
     case publicSourcesUnavailable
+    case invalidProxy
     case noModels
     case noTweets
     case invalidResponse
@@ -104,11 +106,67 @@ enum TiboMonitorError: LocalizedError {
         case .invalidCustomBaseURL: return T("tiboInvalidCustomBaseURL")
         case .insecureCustomBaseURL: return T("tiboInsecureCustomBaseURL")
         case .publicSourcesUnavailable: return T("tiboPublicSourcesUnavailable")
+        case .invalidProxy: return T("tiboInvalidProxy")
         case .noModels: return T("tiboNoModels")
         case .noTweets: return T("tiboNoTweets")
         case .invalidResponse: return T("tiboInvalidResponse")
         case .server(let message): return message
         }
+    }
+}
+
+enum TiboNetworkProxy {
+    static let enabledKey = "tibo.proxy.enabled"
+    static let hostKey = "tibo.proxy.host"
+    static let portKey = "tibo.proxy.port"
+    static let defaultHost = "127.0.0.1"
+    static let defaultPort = 7890
+
+    static func session(defaults: UserDefaults = .standard) throws -> URLSession {
+        URLSession(configuration: try configuration(defaults: defaults))
+    }
+
+    static func configuration(defaults: UserDefaults = .standard) throws -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.default
+        guard defaults.bool(forKey: enabledKey) else { return configuration }
+
+        let host = (defaults.string(forKey: hostKey) ?? defaultHost)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let port = (defaults.object(forKey: portKey) as? NSNumber)?.intValue ?? defaultPort
+        guard !host.isEmpty,
+              !host.contains("://"),
+              !host.contains("/"),
+              host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
+              (1...65_535).contains(port) else {
+            throw TiboMonitorError.invalidProxy
+        }
+
+        configuration.connectionProxyDictionary = [
+            kCFNetworkProxiesHTTPEnable as String: true,
+            kCFNetworkProxiesHTTPProxy as String: host,
+            kCFNetworkProxiesHTTPPort as String: port,
+            kCFNetworkProxiesHTTPSEnable as String: true,
+            kCFNetworkProxiesHTTPSProxy as String: host,
+            kCFNetworkProxiesHTTPSPort as String: port,
+            kCFNetworkProxiesExcludeSimpleHostnames as String: true,
+            kCFNetworkProxiesExceptionsList as String: ["localhost", "127.0.0.1", "::1"]
+        ]
+        return configuration
+    }
+
+    static func test(defaults: UserDefaults = .standard) async throws {
+        guard defaults.bool(forKey: enabledKey),
+              let url = URL(string: "https://x.com/thsottiaux") else {
+            throw TiboMonitorError.invalidProxy
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        request.setValue(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
+        let (_, response) = try await session(defaults: defaults).data(for: request)
+        guard response is HTTPURLResponse else { throw TiboMonitorError.invalidResponse }
     }
 }
 
@@ -139,9 +197,10 @@ enum TiboMonitorService {
     static func checkForLatest(
         force: Bool,
         defaults: UserDefaults = .standard,
-        session: URLSession = .shared
+        session: URLSession? = nil
     ) async throws -> TiboAnalysis? {
         if !force && !defaults.bool(forKey: "tiboMonitoringEnabled") { return nil }
+        let networkSession = try session ?? TiboNetworkProxy.session(defaults: defaults)
         let source = TiboPostSource(
             rawValue: defaults.string(forKey: TiboMonitorPersistence.sourceKey)
                 ?? TiboPostSource.publicProfile.rawValue
@@ -151,7 +210,7 @@ enum TiboMonitorService {
         case .publicProfile:
             let profileURL = defaults.string(forKey: TiboMonitorPersistence.profileURLKey)
                 ?? TiboMonitorPersistence.defaultProfileURL
-            tweet = try await latestPublicTweet(profileURL: profileURL, session: session)
+            tweet = try await latestPublicTweet(profileURL: profileURL, session: networkSession)
         case .officialAPI:
             guard let xToken = Keychain.read("tibo.xBearerToken"), !xToken.isEmpty else {
                 throw TiboMonitorError.missingXToken
@@ -160,10 +219,10 @@ enum TiboMonitorService {
             if let saved = defaults.string(forKey: TiboMonitorPersistence.xUserIDKey), !saved.isEmpty {
                 userID = saved
             } else {
-                userID = try await resolveTiboUserID(token: xToken, session: session)
+                userID = try await resolveTiboUserID(token: xToken, session: networkSession)
                 defaults.set(userID, forKey: TiboMonitorPersistence.xUserIDKey)
             }
-            tweet = try await latestTweet(userID: userID, token: xToken, session: session)
+            tweet = try await latestTweet(userID: userID, token: xToken, session: networkSession)
         }
         if !force && defaults.string(forKey: TiboMonitorPersistence.lastTweetIDKey) == tweet.id {
             return nil
@@ -188,7 +247,7 @@ enum TiboMonitorService {
             model: model,
             baseURL: baseURL,
             language: L10n.currentLanguage,
-            session: session
+            session: networkSession
         )
         defaults.set(tweet.id, forKey: TiboMonitorPersistence.lastTweetIDKey)
         return analysis
@@ -212,6 +271,10 @@ enum TiboMonitorService {
         let screenName = try screenName(from: profileURL)
         return try await withThrowingTaskGroup(of: Result<TiboTweet, Error>.self) { group in
             group.addTask {
+                do { return .success(try await latestDirectProfileTweet(screenName: screenName, session: session)) }
+                catch { return .failure(error) }
+            }
+            group.addTask {
                 do { return .success(try await latestSyndicationTweet(screenName: screenName, session: session)) }
                 catch { return .failure(error) }
             }
@@ -227,6 +290,93 @@ enum TiboMonitorService {
             }
             throw TiboMonitorError.publicSourcesUnavailable
         }
+    }
+
+    private static func latestDirectProfileTweet(
+        screenName: String,
+        session: URLSession
+    ) async throws -> TiboTweet {
+        guard let encoded = screenName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = URL(string: "https://x.com/\(encoded)") else {
+            throw TiboMonitorError.invalidProfileURL
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 15
+        request.setValue(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
+        let data = try await requestData(request, session: session)
+        return try parseDirectProfile(data, screenName: screenName)
+    }
+
+    static func parseDirectProfile(_ data: Data, screenName: String) throws -> TiboTweet {
+        guard var html = String(data: data, encoding: .utf8) else {
+            throw TiboMonitorError.noTweets
+        }
+        html.removeAll(where: { $0 == "\0" })
+        guard let articles = try? NSRegularExpression(
+            pattern: #"(?is)<article\b[^>]*data-tweet-id="([0-9]{6,25})"[^>]*>(.*?)</article>"#
+        ) else { throw TiboMonitorError.noTweets }
+        let matches = articles.matches(in: html, range: NSRange(html.startIndex..., in: html))
+        var tweets: [TiboTweet] = []
+        for match in matches {
+            guard let idRange = Range(match.range(at: 1), in: html),
+                  let bodyRange = Range(match.range(at: 2), in: html) else { continue }
+            let id = String(html[idRange])
+            let body = String(html[bodyRange])
+            guard let text = metaContent(named: "articleBody", in: body), !text.isEmpty else { continue }
+            let published = metaContent(named: "datePublished", in: body).flatMap(parseISODate)
+            tweets.append(TiboTweet(id: id, text: String(text.prefix(2_000)), createdAt: published ?? snowflakeDate(id)))
+        }
+        guard let latest = tweets.max(by: { compareSnowflake($0.id, $1.id) == .orderedAscending }) else {
+            throw TiboMonitorError.noTweets
+        }
+        return latest
+    }
+
+    private static func metaContent(named itemProperty: String, in html: String) -> String? {
+        let escaped = NSRegularExpression.escapedPattern(for: itemProperty)
+        let patterns = [
+            #"(?is)<meta\b[^>]*content="([^"]*)"[^>]*itemProp="\#(escaped)"[^>]*/?>"#,
+            #"(?is)<meta\b[^>]*itemProp="\#(escaped)"[^>]*content="([^"]*)"[^>]*/?>"#
+        ]
+        for pattern in patterns {
+            guard let expression = try? NSRegularExpression(pattern: pattern),
+                  let match = expression.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
+                  let range = Range(match.range(at: 1), in: html) else { continue }
+            return decodeHTMLEntities(String(html[range]))
+        }
+        return nil
+    }
+
+    private static func decodeHTMLEntities(_ text: String) -> String {
+        let named = text
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#x27;", with: "'")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+        guard let expression = try? NSRegularExpression(pattern: #"&#(?:x([0-9A-Fa-f]+)|([0-9]+));"#) else {
+            return named
+        }
+        var result = named
+        for match in expression.matches(in: named, range: NSRange(named.startIndex..., in: named)).reversed() {
+            guard let whole = Range(match.range(at: 0), in: result) else { continue }
+            let value: UInt32?
+            if let hexRange = Range(match.range(at: 1), in: named) {
+                value = UInt32(named[hexRange], radix: 16)
+            } else if let decimalRange = Range(match.range(at: 2), in: named) {
+                value = UInt32(named[decimalRange], radix: 10)
+            } else {
+                value = nil
+            }
+            if let value, let scalar = UnicodeScalar(value) {
+                result.replaceSubrange(whole, with: String(scalar))
+            }
+        }
+        return result
     }
 
     private static func latestSyndicationTweet(
