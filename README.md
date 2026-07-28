@@ -13,6 +13,8 @@ A native macOS desktop widget for monitoring GPT / Codex and Claude usage withou
 - Refreshes and re-detects services every 30 seconds.
 - Attributes usage changes to the latest Codex or Claude task.
 - Keeps up to three recent tasks per provider; Claude shows every changed usage window separately.
+- Watches Tibo (`@thsottiaux`) for new posts and can ask OpenAI, Claude, Gemini, or DeepSeek whether they may signal a GPT / Codex quota reset.
+- Keeps the latest post and a concise AI verdict below GPT tasks; a possible reset turns the GPT card green until you click it once.
 - Lives at the Finder desktop layer, behind normal application windows.
 - Supports English, Simplified Chinese, Traditional Chinese, and Japanese.
 - Uses native Liquid Glass on macOS 26 and a native visual-effect fallback on earlier systems.
@@ -23,7 +25,9 @@ GPT / Codex usage is read from the local Codex read-only app-server interface. C
 
 Fable is a model-scoped limit that Claude Desktop may not write to its local history. If Fable shows `—`, open Settings and choose **Connect Fable usage** for one-time official Claude Code authorization. An Anthropic Admin API key with a custom monthly budget is also available as an optional fallback.
 
-Credentials entered in Settings are stored in macOS Keychain. Usage history and the three most recent task records stay on the Mac.
+Tibo monitoring uses the official X API and therefore requires an X API Bearer Token. In Settings, add that token, choose OpenAI, Claude, Gemini, or DeepSeek, enter its API key, test the connection to load available models, and select one. Automatic checks run every two minutes; the sparkle button next to Refresh checks immediately and reanalyzes the latest post.
+
+Credentials entered in Settings are stored in macOS Keychain. Usage history, the three most recent task records, and the latest Tibo analysis stay on the Mac. Only the text of a newly detected Tibo post is sent to the AI provider you select.
 
 ## Requirements
 
@@ -45,6 +49,7 @@ The signed local build is written to `dist/Agent AI Usage.app`.
 - GPT missing: open ChatGPT or Codex, confirm you are signed in, then press Refresh.
 - Claude missing: open Claude Desktop once so it updates its local usage history.
 - Fable missing: use **Settings → Connect Fable usage**.
+- Tibo analysis missing: add both the X Bearer Token and an AI provider API key in Settings, test each connection, then press the sparkle button.
 - The widget is missing: use the menu-bar item **Show widget on this display**.
 
 ## License

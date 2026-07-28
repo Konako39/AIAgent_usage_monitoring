@@ -75,7 +75,9 @@ private struct QuotaBaseline: Codable {
 @MainActor
 final class QuotaStore: ObservableObject {
     typealias ProviderFetcher = () async -> ProviderPoll
+    typealias TiboFetcher = (_ force: Bool, _ defaults: UserDefaults) async throws -> TiboAnalysis?
     nonisolated static let defaultRefreshInterval: TimeInterval = 30
+    nonisolated static let defaultTiboRefreshInterval: TimeInterval = 120
 
     @Published var gpt: QuotaSnapshot
     @Published var claude: QuotaSnapshot
@@ -83,11 +85,18 @@ final class QuotaStore: ObservableObject {
     @Published var claudeEvents: [UsageEvent]
     @Published var isRefreshing = false
     @Published var lastUpdated: Date?
+    @Published var tiboAnalysis: TiboAnalysis?
+    @Published var isCheckingTibo = false
+    @Published var tiboError: String?
+    @Published var tiboResetAlertActive: Bool
 
     private var timer: Timer?
+    private var tiboTimer: Timer?
     private let defaults: UserDefaults
     private let gptFetcher: ProviderFetcher
     private let claudeFetcher: ProviderFetcher
+    private let tiboFetcher: TiboFetcher
+    private var pendingTiboAnalysis: TiboAnalysis?
 
     init(
         refreshInterval: TimeInterval = QuotaStore.defaultRefreshInterval,
@@ -95,15 +104,21 @@ final class QuotaStore: ObservableObject {
         demo: Bool = false,
         defaults: UserDefaults = .standard,
         gptFetcher: @escaping ProviderFetcher = { await QuotaService.fetchCodex() },
-        claudeFetcher: @escaping ProviderFetcher = { await QuotaService.fetchClaude() }
+        claudeFetcher: @escaping ProviderFetcher = { await QuotaService.fetchClaude() },
+        tiboFetcher: @escaping TiboFetcher = { force, defaults in
+            try await TiboMonitorService.checkForLatest(force: force, defaults: defaults)
+        }
     ) {
         self.defaults = defaults
         self.gptFetcher = gptFetcher
         self.claudeFetcher = claudeFetcher
+        self.tiboFetcher = tiboFetcher
         self.gpt = .disconnected(T("codexConnecting"))
         self.claude = .disconnected(T("claudeNotConnected"))
         self.gptEvents = UsageHistory.load("gpt", defaults: defaults)
         self.claudeEvents = UsageHistory.load("claude", defaults: defaults)
+        self.tiboAnalysis = TiboMonitorPersistence.load(defaults: defaults)
+        self.tiboResetAlertActive = defaults.bool(forKey: TiboMonitorPersistence.alertKey)
 
         if demo {
             loadDemoData()
@@ -113,7 +128,14 @@ final class QuotaStore: ObservableObject {
             timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
                 Task { @MainActor in self?.refresh() }
             }
+            tiboTimer = Timer.scheduledTimer(
+                withTimeInterval: QuotaStore.defaultTiboRefreshInterval,
+                repeats: true
+            ) { [weak self] _ in
+                Task { @MainActor in self?.checkTibo(force: false) }
+            }
             refresh()
+            checkTibo(force: false)
         }
     }
 
@@ -133,6 +155,51 @@ final class QuotaStore: ObservableObject {
         apply(results.1, provider: "claude")
         lastUpdated = Date()
         isRefreshing = false
+    }
+
+    func checkTibo(force: Bool = true) {
+        Task { await checkTiboNow(force: force) }
+    }
+
+    func checkTiboNow(force: Bool) async {
+        guard !isCheckingTibo else { return }
+        isCheckingTibo = true
+        defer { isCheckingTibo = false }
+        do {
+            if let analysis = try await tiboFetcher(force, defaults) {
+                applyTiboAnalysis(analysis)
+            }
+            tiboError = nil
+        } catch {
+            if force || tiboAnalysis == nil {
+                tiboError = error.localizedDescription
+            }
+        }
+    }
+
+    func applyTiboAnalysis(_ analysis: TiboAnalysis) {
+        if tiboResetAlertActive,
+           tiboAnalysis?.suggestsReset == true,
+           !analysis.suggestsReset {
+            pendingTiboAnalysis = analysis
+            return
+        }
+        tiboAnalysis = analysis
+        TiboMonitorPersistence.save(analysis, defaults: defaults)
+        if analysis.suggestsReset {
+            tiboResetAlertActive = true
+            defaults.set(true, forKey: TiboMonitorPersistence.alertKey)
+        }
+    }
+
+    func acknowledgeTiboResetAlert() {
+        tiboResetAlertActive = false
+        defaults.set(false, forKey: TiboMonitorPersistence.alertKey)
+        if let pendingTiboAnalysis {
+            self.pendingTiboAnalysis = nil
+            tiboAnalysis = pendingTiboAnalysis
+            TiboMonitorPersistence.save(pendingTiboAnalysis, defaults: defaults)
+        }
     }
 
     func apply(_ poll: ProviderPoll, provider: String, now: Date = Date()) {
@@ -255,6 +322,25 @@ final class QuotaStore: ObservableObject {
                 .init(limitID: "seven_day", consumed: 0.4)
             ])
         ]
+        tiboAnalysis = TiboAnalysis(
+            tweet: TiboTweet(
+                id: "1949820186234567890",
+                text: DemoMode.resetAlert
+                    ? "We are looking at refreshing Codex usage limits for affected users. More soon."
+                    : "Codex is getting a smoother release flow this week. More details soon.",
+                createdAt: now.addingTimeInterval(-540)
+            ),
+            relatedToQuotaReset: DemoMode.resetAlert,
+            likelihood: DemoMode.resetAlert ? .possible : .unlikely,
+            conclusion: DemoMode.resetAlert ? "Possible usage reset" : "No quota reset signal",
+            explanation: DemoMode.resetAlert
+                ? "The post explicitly mentions refreshing usage limits for users."
+                : "This post discusses a product update, not a usage-limit reset.",
+            provider: .openAI,
+            model: "gpt-5.6-luna",
+            analyzedAt: now.addingTimeInterval(-500)
+        )
+        tiboResetAlertActive = DemoMode.resetAlert
         lastUpdated = now
     }
 }
@@ -1238,6 +1324,100 @@ private struct QuotaRow: View {
     }
 }
 
+private struct TiboInsightView: View {
+    let analysis: TiboAnalysis?
+    let error: String?
+    let alertActive: Bool
+    let language: AppLanguage
+    let acknowledge: () -> Void
+
+    var body: some View {
+        Group {
+            if let analysis {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bubble.left.and.text.bubble.right.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("@thsottiaux · Tibo")
+                            .font(.system(size: 9.5, weight: .semibold, design: .rounded))
+                        Spacer(minLength: 4)
+                        Text(verdictText(for: analysis))
+                            .font(.system(size: 8, weight: .bold, design: .rounded))
+                            .foregroundStyle(verdictColor(for: analysis))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(verdictColor(for: analysis).opacity(0.11), in: Capsule())
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if alertActive { acknowledge() }
+                    }
+
+                    Button {
+                        if let url = analysis.tweet.url { NSWorkspace.shared.open(url) }
+                    } label: {
+                        Text("“\(analysis.tweet.text)”")
+                            .font(.system(size: 9.5, weight: .medium))
+                            .foregroundStyle(.primary.opacity(0.88))
+                            .lineLimit(3)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .help(T("tiboOpenTweet", language: language))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(analysis.conclusion)
+                            .font(.system(size: 9, weight: .semibold))
+                            .lineLimit(1)
+                        Text(analysis.explanation)
+                            .font(.system(size: 8.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    HStack(spacing: 4) {
+                        Text("\(analysis.provider.displayName) · \(analysis.model)")
+                        Spacer()
+                        if alertActive {
+                            Text(T("tiboTapToDismiss", language: language))
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    .font(.system(size: 7.5, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                }
+                .padding(.leading, 41)
+                .padding(.trailing, 2)
+                .padding(.top, 7)
+                .padding(.bottom, 8)
+            } else if let error {
+                HStack(spacing: 7) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(error)
+                        .lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 8.5, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 41)
+                .frame(height: 42)
+            }
+        }
+    }
+
+    private func verdictText(for analysis: TiboAnalysis) -> String {
+        if alertActive { return T("tiboResetAlert", language: language) }
+        if analysis.suggestsReset { return T("tiboPossibleVerdict", language: language) }
+        return T("tiboUnrelatedVerdict", language: language)
+    }
+
+    private func verdictColor(for analysis: TiboAnalysis) -> Color {
+        analysis.suggestsReset ? .green : .secondary
+    }
+}
+
 struct WidgetView: View {
     @ObservedObject var store: QuotaStore
     @State private var appeared = false
@@ -1278,6 +1458,16 @@ struct WidgetView: View {
                     TroubleshootingView(store: store, language: language)
                 }
 
+                Button { store.checkTibo(force: true) } label: {
+                    Image(systemName: "sparkle.magnifyingglass")
+                        .font(.system(size: 11, weight: .semibold))
+                        .symbolEffect(.pulse, isActive: store.isCheckingTibo)
+                        .frame(width: 25, height: 25)
+                }
+                .buttonStyle(.plain)
+                .background(Color.primary.opacity(0.055), in: Circle())
+                .help(T("tiboCheckNow", language: language))
+
                 Button { store.refresh() } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11, weight: .semibold))
@@ -1306,14 +1496,47 @@ struct WidgetView: View {
             .padding(.bottom, 9)
             .background(WindowDragHandle())
 
-            QuotaRow(
-                name: "GPT · Codex",
-                logoResource: "openai",
-                snapshot: store.gpt,
-                refreshing: store.isRefreshing,
-                events: store.gptEvents,
-                language: language,
-                expanded: $gptExpanded
+            VStack(spacing: 0) {
+                QuotaRow(
+                    name: "GPT · Codex",
+                    logoResource: "openai",
+                    snapshot: store.gpt,
+                    refreshing: store.isRefreshing,
+                    events: store.gptEvents,
+                    language: language,
+                    expanded: $gptExpanded
+                )
+
+                if store.tiboAnalysis != nil || store.tiboError != nil {
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.055))
+                        .frame(height: 0.5)
+                        .padding(.leading, 41)
+                    TiboInsightView(
+                        analysis: store.tiboAnalysis,
+                        error: store.tiboError,
+                        alertActive: store.tiboResetAlertActive,
+                        language: language,
+                        acknowledge: store.acknowledgeTiboResetAlert
+                    )
+                }
+            }
+            .background(
+                store.tiboResetAlertActive ? Color.green.opacity(0.035) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 15, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .stroke(
+                        store.tiboResetAlertActive ? Color.green.opacity(0.88) : Color.clear,
+                        lineWidth: 1.35
+                    )
+            }
+            .animation(.easeInOut(duration: 0.25), value: store.tiboResetAlertActive)
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    if store.tiboResetAlertActive { store.acknowledgeTiboResetAlert() }
+                }
             )
 
             Rectangle()
@@ -1366,6 +1589,13 @@ struct WidgetView: View {
         229 + historyHeight(store.gptEvents, expanded: gptExpanded)
             + historyHeight(store.claudeEvents, expanded: claudeExpanded)
             + (store.claude.limits.isEmpty ? 0 : 38)
+            + tiboHeight
+    }
+
+    private var tiboHeight: CGFloat {
+        if store.tiboAnalysis != nil { return 126 }
+        if store.tiboError != nil { return 42 }
+        return 0
     }
 
     private func historyHeight(_ events: [UsageEvent], expanded: Bool) -> CGFloat {
@@ -1468,12 +1698,24 @@ struct SettingsView: View {
     @ObservedObject var store: QuotaStore
     @AppStorage("anthropicMonthlyBudget") private var monthlyBudget = 100.0
     @AppStorage("appLanguage") private var appLanguageRaw = AppLanguage.english.rawValue
+    @AppStorage("tiboMonitoringEnabled") private var tiboMonitoringEnabled = false
+    @AppStorage("tiboLLMProvider") private var tiboProviderRaw = LLMProvider.openAI.rawValue
     @State private var oauthToken = ""
     @State private var adminKey = ""
+    @State private var xBearerToken = ""
+    @State private var llmAPIKey = ""
+    @State private var llmModels: [LLMModelOption] = []
+    @State private var selectedLLMModel = ""
+    @State private var isTestingX = false
+    @State private var isLoadingModels = false
     @State private var savedMessage = ""
 
     private var language: AppLanguage {
         AppLanguage(rawValue: appLanguageRaw) ?? .english
+    }
+
+    private var selectedProvider: LLMProvider {
+        LLMProvider(rawValue: tiboProviderRaw) ?? .openAI
     }
 
     var body: some View {
@@ -1494,6 +1736,90 @@ struct SettingsView: View {
                 Label(store.gpt.connected ? T("codexDetected", language: language) : T("codexUndetected", language: language),
                       systemImage: store.gpt.connected ? "checkmark.circle.fill" : "exclamationmark.circle")
                 Text(T("codexDescription", language: language))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section(T("tiboSection", language: language)) {
+                Toggle(T("tiboAutomaticMonitoring", language: language), isOn: $tiboMonitoringEnabled)
+
+                SecureField(T("tiboXTokenPlaceholder", language: language), text: $xBearerToken)
+                HStack {
+                    Button(T("tiboTestX", language: language)) {
+                        let token = xBearerToken.trimmingCharacters(in: .whitespacesAndNewlines)
+                        isTestingX = true
+                        savedMessage = ""
+                        Task {
+                            defer { isTestingX = false }
+                            do {
+                                let id = try await TiboMonitorService.testXConnection(token: token)
+                                Keychain.save(token, key: "tibo.xBearerToken")
+                                UserDefaults.standard.set(id, forKey: TiboMonitorPersistence.xUserIDKey)
+                                savedMessage = T("tiboXConnected", language: language)
+                                activateTiboIfReady()
+                            } catch {
+                                savedMessage = error.localizedDescription
+                            }
+                        }
+                    }
+                    .disabled(isTestingX || xBearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Link(T("tiboOpenXDeveloper", language: language), destination: URL(string: "https://developer.x.com/")!)
+                }
+
+                Picker(T("tiboModelProvider", language: language), selection: $tiboProviderRaw) {
+                    ForEach(LLMProvider.allCases) { provider in
+                        Text(provider.displayName).tag(provider.rawValue)
+                    }
+                }
+
+                SecureField(T("tiboLLMKeyPlaceholder", language: language), text: $llmAPIKey)
+                Button(T("tiboTestAndFetchModels", language: language)) {
+                    let provider = selectedProvider
+                    let key = llmAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    isLoadingModels = true
+                    savedMessage = ""
+                    Task {
+                        defer { isLoadingModels = false }
+                        do {
+                            let models = try await LLMService.listModels(provider: provider, apiKey: key)
+                            Keychain.save(key, key: provider.keychainKey)
+                            llmModels = models
+                            if !models.contains(where: { $0.id == selectedLLMModel }) {
+                                selectedLLMModel = models[0].id
+                            }
+                            UserDefaults.standard.set(selectedLLMModel, forKey: provider.modelDefaultsKey)
+                            savedMessage = String(
+                                format: T("tiboModelsLoaded", language: language),
+                                models.count
+                            )
+                            activateTiboIfReady()
+                        } catch {
+                            savedMessage = error.localizedDescription
+                        }
+                    }
+                }
+                .disabled(isLoadingModels || llmAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if !selectedLLMModel.isEmpty {
+                    Picker(T("tiboModel", language: language), selection: $selectedLLMModel) {
+                        ForEach(modelChoices) { model in
+                            Text(model.displayName).tag(model.id)
+                        }
+                    }
+                }
+
+                HStack {
+                    Button(T("tiboCheckNow", language: language)) { store.checkTibo(force: true) }
+                        .disabled(store.isCheckingTibo)
+                    if store.tiboResetAlertActive {
+                        Button(T("tiboDismissAlert", language: language)) {
+                            store.acknowledgeTiboResetAlert()
+                        }
+                    }
+                }
+
+                Text(T("tiboSettingsHelp", language: language))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1556,16 +1882,52 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 560, height: 610)
+        .frame(width: 600, height: 820)
         .onAppear {
             oauthToken = Keychain.read("claude-oauth-token") ?? ""
             adminKey = Keychain.read("anthropic-admin-key") ?? ""
+            xBearerToken = Keychain.read("tibo.xBearerToken") ?? ""
+            loadLLMConfiguration()
         }
         .onChange(of: appLanguageRaw) { _, _ in
             savedMessage = ""
             SettingsWindowController.shared.updateTitle()
             store.refresh()
         }
+        .onChange(of: tiboProviderRaw) { _, _ in
+            loadLLMConfiguration()
+            savedMessage = ""
+        }
+        .onChange(of: selectedLLMModel) { _, model in
+            guard !model.isEmpty else { return }
+            UserDefaults.standard.set(model, forKey: selectedProvider.modelDefaultsKey)
+        }
+    }
+
+    private var modelChoices: [LLMModelOption] {
+        if llmModels.contains(where: { $0.id == selectedLLMModel }) { return llmModels }
+        guard !selectedLLMModel.isEmpty else { return llmModels }
+        return [LLMModelOption(id: selectedLLMModel, displayName: selectedLLMModel)] + llmModels
+    }
+
+    private func loadLLMConfiguration() {
+        let provider = selectedProvider
+        llmAPIKey = Keychain.read(provider.keychainKey) ?? ""
+        selectedLLMModel = UserDefaults.standard.string(forKey: provider.modelDefaultsKey) ?? ""
+        llmModels = selectedLLMModel.isEmpty
+            ? []
+            : [LLMModelOption(id: selectedLLMModel, displayName: selectedLLMModel)]
+    }
+
+    private func activateTiboIfReady() {
+        let provider = selectedProvider
+        guard Keychain.read("tibo.xBearerToken")?.isEmpty == false,
+              Keychain.read(provider.keychainKey)?.isEmpty == false,
+              UserDefaults.standard.string(forKey: provider.modelDefaultsKey)?.isEmpty == false else {
+            return
+        }
+        tiboMonitoringEnabled = true
+        store.checkTibo(force: true)
     }
 }
 
@@ -1586,7 +1948,7 @@ private final class SettingsWindowController: NSObject, NSWindowDelegate {
         let window = NSWindow(contentViewController: hostingController)
         window.title = T("settingsTitle")
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 560, height: 610))
+        window.setContentSize(NSSize(width: 600, height: 820))
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
