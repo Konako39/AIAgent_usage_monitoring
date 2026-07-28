@@ -417,7 +417,9 @@ enum QuotaService {
             return ProviderPoll(snapshot: desktopSnapshot, taskName: latestClaudeTaskName())
         }
         do {
-            if let adminKey = Keychain.read("anthropic-admin-key"), !adminKey.isEmpty {
+            if UserDefaults.standard.bool(forKey: "useSavedAnthropicAdmin"),
+               let adminKey = Keychain.read("anthropic-admin-key"),
+               !adminKey.isEmpty {
                 return ProviderPoll(
                     snapshot: try await fetchClaudeAPIBudget(adminKey: adminKey),
                     taskName: latestClaudeTaskName() ?? T("claudeAPIUsage")
@@ -714,7 +716,6 @@ enum QuotaService {
     }
 
     private static func claudeOAuthToken() -> String? {
-        if let saved = Keychain.read("claude-oauth-token"), !saved.isEmpty { return saved }
         let url = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/.credentials.json")
         guard
@@ -723,7 +724,14 @@ enum QuotaService {
             let oauth = root["claudeAiOauth"] as? [String: Any],
             let token = oauth["accessToken"] as? String,
             !token.isEmpty
-        else { return nil }
+        else {
+            if UserDefaults.standard.bool(forKey: "useSavedClaudeOAuth"),
+               let saved = Keychain.read("claude-oauth-token"),
+               !saved.isEmpty {
+                return saved
+            }
+            return nil
+        }
         return token
     }
 
@@ -859,6 +867,9 @@ enum QuotaService {
 
 enum Keychain {
     private static let service = "com.konako.quotamonitor"
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var cachedValues: [String: String] = [:]
+    nonisolated(unsafe) private static var attemptedReads: Set<String> = []
 
     static func save(_ value: String, key: String) {
         let query: [String: Any] = [
@@ -867,6 +878,14 @@ enum Keychain {
             kSecAttrAccount as String: key
         ]
         SecItemDelete(query as CFDictionary)
+        cacheLock.lock()
+        attemptedReads.insert(key)
+        if value.isEmpty {
+            cachedValues.removeValue(forKey: key)
+        } else {
+            cachedValues[key] = value
+        }
+        cacheLock.unlock()
         guard !value.isEmpty else { return }
         var item = query
         item[kSecValueData as String] = Data(value.utf8)
@@ -875,6 +894,18 @@ enum Keychain {
     }
 
     static func read(_ key: String) -> String? {
+        cacheLock.lock()
+        if let cached = cachedValues[key] {
+            cacheLock.unlock()
+            return cached
+        }
+        if attemptedReads.contains(key) {
+            cacheLock.unlock()
+            return nil
+        }
+        attemptedReads.insert(key)
+        cacheLock.unlock()
+
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -884,8 +915,12 @@ enum Keychain {
         ]
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+              let data = result as? Data,
+              let value = String(data: data, encoding: .utf8) else { return nil }
+        cacheLock.lock()
+        cachedValues[key] = value
+        cacheLock.unlock()
+        return value
     }
 }
 
@@ -1712,6 +1747,7 @@ struct SettingsView: View {
     @State private var isTestingSource = false
     @State private var isLoadingModels = false
     @State private var savedMessage = ""
+    @State private var savedMessageIsError = false
 
     private var language: AppLanguage {
         AppLanguage(rawValue: appLanguageRaw) ?? .english
@@ -1757,8 +1793,13 @@ struct SettingsView: View {
 
                 if selectedTiboSource == .publicProfile {
                     TextField(T("tiboProfileURLPlaceholder", language: language), text: $tiboProfileURL)
-                    Button(T("tiboTestProfile", language: language)) {
+                    Button {
                         testTiboSource()
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isTestingSource { ProgressView().controlSize(.small) }
+                            Text(T(isTestingSource ? "tiboTestingProfile" : "tiboTestProfile", language: language))
+                        }
                     }
                     .disabled(isTestingSource || tiboProfileURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     Text(T("tiboPublicProfileHelp", language: language))
@@ -1790,6 +1831,9 @@ struct SettingsView: View {
                 }
 
                 SecureField(T("tiboLLMKeyPlaceholder", language: language), text: $llmAPIKey)
+                Text(T("tiboKeychainOnDemand", language: language))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Button(T("tiboTestAndFetchModels", language: language)) {
                     let provider = selectedProvider
                     let key = llmAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1798,6 +1842,7 @@ struct SettingsView: View {
                         : nil
                     isLoadingModels = true
                     savedMessage = ""
+                    savedMessageIsError = false
                     Task {
                         defer { isLoadingModels = false }
                         do {
@@ -1827,6 +1872,7 @@ struct SettingsView: View {
                             activateTiboIfReady()
                         } catch {
                             savedMessage = error.localizedDescription
+                            savedMessageIsError = true
                         }
                     }
                 }
@@ -1867,14 +1913,18 @@ struct SettingsView: View {
                 HStack {
                     Button(T("saveSubscription", language: language)) {
                         Keychain.save(oauthToken, key: "claude-oauth-token")
+                        UserDefaults.standard.set(!oauthToken.isEmpty, forKey: "useSavedClaudeOAuth")
                         savedMessage = T("savedClaude", language: language)
+                        savedMessageIsError = false
                         store.refresh()
                     }
                     Button(T("connectFable", language: language)) {
                         if QuotaService.openClaudeCodeLogin() {
                             savedMessage = T("finishTerminalLogin", language: language)
+                            savedMessageIsError = false
                         } else {
                             savedMessage = T("claudeCodeMissing", language: language)
+                            savedMessageIsError = true
                         }
                     }
                     Button(T("openClaude", language: language)) {
@@ -1899,7 +1949,9 @@ struct SettingsView: View {
                 }
                 Button(T("saveAPI", language: language)) {
                     Keychain.save(adminKey, key: "anthropic-admin-key")
+                    UserDefaults.standard.set(!adminKey.isEmpty, forKey: "useSavedAnthropicAdmin")
                     savedMessage = T("savedAPI", language: language)
+                    savedMessageIsError = false
                     store.refresh()
                 }
                 Text(T("apiFallbackHelp", language: language))
@@ -1909,28 +1961,28 @@ struct SettingsView: View {
 
             if !savedMessage.isEmpty {
                 Text(savedMessage)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(savedMessageIsError ? Color.orange : Color.green)
             }
         }
         .formStyle(.grouped)
         .frame(width: 600, height: 820)
         .onAppear {
-            oauthToken = Keychain.read("claude-oauth-token") ?? ""
-            adminKey = Keychain.read("anthropic-admin-key") ?? ""
-            xBearerToken = Keychain.read("tibo.xBearerToken") ?? ""
             loadLLMConfiguration()
         }
         .onChange(of: appLanguageRaw) { _, _ in
             savedMessage = ""
+            savedMessageIsError = false
             SettingsWindowController.shared.updateTitle()
             store.refresh()
         }
         .onChange(of: tiboProviderRaw) { _, _ in
             loadLLMConfiguration()
             savedMessage = ""
+            savedMessageIsError = false
         }
         .onChange(of: tiboSourceRaw) { _, _ in
             savedMessage = ""
+            savedMessageIsError = false
         }
         .onChange(of: selectedLLMModel) { _, model in
             guard !model.isEmpty else { return }
@@ -1957,6 +2009,7 @@ struct SettingsView: View {
         let token = xBearerToken.trimmingCharacters(in: .whitespacesAndNewlines)
         isTestingSource = true
         savedMessage = ""
+        savedMessageIsError = false
         Task {
             defer { isTestingSource = false }
             do {
@@ -1974,16 +2027,16 @@ struct SettingsView: View {
                     UserDefaults.standard.set(id, forKey: TiboMonitorPersistence.xUserIDKey)
                     savedMessage = T("tiboXConnected", language: language)
                 }
-                activateTiboIfReady()
             } catch {
                 savedMessage = error.localizedDescription
+                savedMessageIsError = true
             }
         }
     }
 
     private func loadLLMConfiguration() {
         let provider = selectedProvider
-        llmAPIKey = Keychain.read(provider.keychainKey) ?? ""
+        llmAPIKey = ""
         customLLMBaseURL = UserDefaults.standard.string(forKey: provider.baseURLDefaultsKey) ?? ""
         selectedLLMModel = UserDefaults.standard.string(forKey: provider.modelDefaultsKey) ?? ""
         llmModels = selectedLLMModel.isEmpty
@@ -1995,13 +2048,10 @@ struct SettingsView: View {
         let provider = selectedProvider
         let sourceReady = selectedTiboSource == .publicProfile
             ? (try? TiboMonitorService.screenName(from: tiboProfileURL)) != nil
-            : Keychain.read("tibo.xBearerToken")?.isEmpty == false
-        let providerKeyReady = provider.allowsEmptyAPIKey
-            || Keychain.read(provider.keychainKey)?.isEmpty == false
+            : !xBearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let providerBaseURLReady = provider != .openAICompatible
             || UserDefaults.standard.string(forKey: provider.baseURLDefaultsKey)?.isEmpty == false
         guard sourceReady,
-              providerKeyReady,
               providerBaseURLReady,
               UserDefaults.standard.string(forKey: provider.modelDefaultsKey)?.isEmpty == false else {
             return

@@ -88,6 +88,7 @@ enum TiboMonitorError: LocalizedError {
     case missingCustomBaseURL
     case invalidCustomBaseURL
     case insecureCustomBaseURL
+    case publicSourcesUnavailable
     case noModels
     case noTweets
     case invalidResponse
@@ -102,6 +103,7 @@ enum TiboMonitorError: LocalizedError {
         case .missingCustomBaseURL: return T("tiboMissingCustomBaseURL")
         case .invalidCustomBaseURL: return T("tiboInvalidCustomBaseURL")
         case .insecureCustomBaseURL: return T("tiboInsecureCustomBaseURL")
+        case .publicSourcesUnavailable: return T("tiboPublicSourcesUnavailable")
         case .noModels: return T("tiboNoModels")
         case .noTweets: return T("tiboNoTweets")
         case .invalidResponse: return T("tiboInvalidResponse")
@@ -140,18 +142,6 @@ enum TiboMonitorService {
         session: URLSession = .shared
     ) async throws -> TiboAnalysis? {
         if !force && !defaults.bool(forKey: "tiboMonitoringEnabled") { return nil }
-        let provider = LLMProvider(
-            rawValue: defaults.string(forKey: "tiboLLMProvider") ?? LLMProvider.openAI.rawValue
-        ) ?? .openAI
-        let apiKey = Keychain.read(provider.keychainKey) ?? ""
-        guard provider.allowsEmptyAPIKey || !apiKey.isEmpty else {
-            throw TiboMonitorError.missingLLMKey
-        }
-        guard let model = defaults.string(forKey: provider.modelDefaultsKey), !model.isEmpty else {
-            throw TiboMonitorError.missingModel
-        }
-        let baseURL = defaults.string(forKey: provider.baseURLDefaultsKey)
-
         let source = TiboPostSource(
             rawValue: defaults.string(forKey: TiboMonitorPersistence.sourceKey)
                 ?? TiboPostSource.publicProfile.rawValue
@@ -178,6 +168,18 @@ enum TiboMonitorService {
         if !force && defaults.string(forKey: TiboMonitorPersistence.lastTweetIDKey) == tweet.id {
             return nil
         }
+
+        let provider = LLMProvider(
+            rawValue: defaults.string(forKey: "tiboLLMProvider") ?? LLMProvider.openAI.rawValue
+        ) ?? .openAI
+        let apiKey = Keychain.read(provider.keychainKey) ?? ""
+        guard provider.allowsEmptyAPIKey || !apiKey.isEmpty else {
+            throw TiboMonitorError.missingLLMKey
+        }
+        guard let model = defaults.string(forKey: provider.modelDefaultsKey), !model.isEmpty else {
+            throw TiboMonitorError.missingModel
+        }
+        let baseURL = defaults.string(forKey: provider.baseURLDefaultsKey)
 
         let analysis = try await LLMService.analyze(
             tweet: tweet,
@@ -208,18 +210,142 @@ enum TiboMonitorService {
         session: URLSession = .shared
     ) async throws -> TiboTweet {
         let screenName = try screenName(from: profileURL)
+        return try await withThrowingTaskGroup(of: Result<TiboTweet, Error>.self) { group in
+            group.addTask {
+                do { return .success(try await latestSyndicationTweet(screenName: screenName, session: session)) }
+                catch { return .failure(error) }
+            }
+            group.addTask {
+                do { return .success(try await latestJinaTweet(screenName: screenName, session: session)) }
+                catch { return .failure(error) }
+            }
+            for try await result in group {
+                if case .success(let tweet) = result {
+                    group.cancelAll()
+                    return tweet
+                }
+            }
+            throw TiboMonitorError.publicSourcesUnavailable
+        }
+    }
+
+    private static func latestSyndicationTweet(
+        screenName: String,
+        session: URLSession
+    ) async throws -> TiboTweet {
         guard let encoded = screenName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
               let url = URL(string: "https://syndication.twitter.com/srv/timeline-profile/screen-name/\(encoded)?lang=en&showReplies=true") else {
             throw TiboMonitorError.invalidProfileURL
         }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 20
+        request.timeoutInterval = 12
         request.setValue(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15",
             forHTTPHeaderField: "User-Agent"
         )
         let data = try await requestData(request, session: session)
         return try parseSyndicationTimeline(data, screenName: screenName)
+    }
+
+    private static func latestJinaTweet(
+        screenName: String,
+        session: URLSession
+    ) async throws -> TiboTweet {
+        guard let encoded = screenName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let profileReaderURL = URL(string: "https://r.jina.ai/https://x.com/\(encoded)") else {
+            throw TiboMonitorError.invalidProfileURL
+        }
+        let profileData = try await readerData(url: profileReaderURL, session: session)
+        let profileDocument = try parseReaderDocument(profileData)
+        let tweetID = try latestStatusID(in: profileDocument.content, screenName: screenName)
+        guard let tweetReaderURL = URL(
+            string: "https://r.jina.ai/https://x.com/\(encoded)/status/\(tweetID)"
+        ) else {
+            throw TiboMonitorError.invalidProfileURL
+        }
+        let tweetData = try await readerData(url: tweetReaderURL, session: session)
+        return try parseReaderTweet(tweetData, id: tweetID)
+    }
+
+    private static func readerData(url: URL, session: URLSession) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 18
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("browser", forHTTPHeaderField: "X-Engine")
+        request.setValue("60", forHTTPHeaderField: "X-Cache-Tolerance")
+        return try await requestData(request, session: session)
+    }
+
+    private struct ReaderDocument {
+        var title: String
+        var content: String
+    }
+
+    private static func parseReaderDocument(_ data: Data) throws -> ReaderDocument {
+        if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let payload = root["data"] as? [String: Any] {
+            return ReaderDocument(
+                title: payload["title"] as? String ?? "",
+                content: payload["content"] as? String ?? ""
+            )
+        }
+        guard let text = String(data: data, encoding: .utf8), !text.isEmpty else {
+            throw TiboMonitorError.noTweets
+        }
+        let title = text.components(separatedBy: .newlines)
+            .first(where: { $0.hasPrefix("Title:") })?
+            .replacingOccurrences(of: "Title:", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return ReaderDocument(title: title, content: text)
+    }
+
+    static func latestStatusID(in content: String, screenName: String) throws -> String {
+        let escaped = NSRegularExpression.escapedPattern(for: screenName)
+        guard let expression = try? NSRegularExpression(
+            pattern: "https?://(?:www\\.)?(?:x\\.com|twitter\\.com)/\(escaped)/status/([0-9]{6,25})",
+            options: [.caseInsensitive]
+        ) else {
+            throw TiboMonitorError.noTweets
+        }
+        let matches = expression.matches(
+            in: content,
+            range: NSRange(content.startIndex..., in: content)
+        )
+        let ids = matches.compactMap { match -> String? in
+            guard let range = Range(match.range(at: 1), in: content) else { return nil }
+            return String(content[range])
+        }
+        guard let latest = ids.max(by: { compareSnowflake($0, $1) == .orderedAscending }) else {
+            throw TiboMonitorError.noTweets
+        }
+        return latest
+    }
+
+    static func parseReaderTweet(_ data: Data, id: String) throws -> TiboTweet {
+        let document = try parseReaderDocument(data)
+        let candidates = [document.title, document.content]
+        let expression = try? NSRegularExpression(
+            pattern: #"(?is)on X:\s*[\"\u201c](.+)[\"\u201d]\s*/\s*X"#
+        )
+        for candidate in candidates where !candidate.isEmpty {
+            guard let expression,
+                  let match = expression.firstMatch(
+                    in: candidate,
+                    range: NSRange(candidate.startIndex..., in: candidate)
+                  ),
+                  let range = Range(match.range(at: 1), in: candidate) else { continue }
+            let text = String(candidate[range])
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                return TiboTweet(
+                    id: id,
+                    text: String(text.prefix(2_000)),
+                    createdAt: snowflakeDate(id)
+                )
+            }
+        }
+        throw TiboMonitorError.noTweets
     }
 
     static func screenName(from profileURL: String) throws -> String {
@@ -314,6 +440,12 @@ enum TiboMonitorService {
     private static func compareSnowflake(_ lhs: String, _ rhs: String) -> ComparisonResult {
         if lhs.count != rhs.count { return lhs.count < rhs.count ? .orderedAscending : .orderedDescending }
         return lhs.compare(rhs)
+    }
+
+    private static func snowflakeDate(_ id: String) -> Date? {
+        guard let value = UInt64(id) else { return nil }
+        let milliseconds = (value >> 22) + 1_288_834_974_657
+        return Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1_000)
     }
 
     private static func parseSyndicationDate(_ value: String) -> Date? {

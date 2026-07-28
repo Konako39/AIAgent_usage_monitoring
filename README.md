@@ -26,11 +26,11 @@ GPT / Codex usage is read from the local Codex read-only app-server interface. C
 
 Fable is a model-scoped limit that Claude Desktop may not write to its local history. If Fable shows `—`, open Settings and choose **Connect Fable usage** for one-time official Claude Code authorization. An Anthropic Admin API key with a custom monthly budget is also available as an optional fallback.
 
-By default, Tibo monitoring only needs the public profile link `https://x.com/thsottiaux`; no X developer credential is required. It reads X's public embedded timeline. The official X API with a Bearer Token remains available as an advanced fallback if the public page changes.
+By default, Tibo monitoring only needs the public profile link `https://x.com/thsottiaux`; no X developer credential is required. It tries X's public embedded timeline and a read-only backup reader in parallel. The official X API with a Bearer Token remains available as an advanced fallback when both public routes are unavailable.
 
 Choose OpenAI, Claude, Gemini, DeepSeek, or Custom OpenAI-compatible, enter the required API information, test the connection to load available models, and select one. Custom endpoints accept an API Base URL such as `https://api.example.com/v1`; local services such as LM Studio may use `http://localhost`. Automatic checks run every two minutes; the sparkle button next to Refresh checks immediately and reanalyzes the latest post.
 
-Credentials entered in Settings are stored in macOS Keychain. Usage history, the three most recent task records, and the latest Tibo analysis stay on the Mac. Only the text of a newly detected Tibo post is sent to the AI provider you select.
+Credentials entered in Settings are stored in macOS Keychain. Opening Settings and testing the public profile never reads saved secrets; Keychain is accessed only when you explicitly test a model or when a newly detected post needs AI analysis. An unchanged background check does not access it. Usage history, the three most recent task records, and the latest Tibo analysis stay on the Mac. Only the text of a newly detected Tibo post is sent to the AI provider you select.
 
 ## Requirements
 
@@ -52,7 +52,7 @@ The signed local build is written to `dist/Agent AI Usage.app`.
 - GPT missing: open ChatGPT or Codex, confirm you are signed in, then press Refresh.
 - Claude missing: open Claude Desktop once so it updates its local usage history.
 - Fable missing: use **Settings → Connect Fable usage**.
-- Tibo analysis missing: test the public profile and AI provider connections in Settings, then press the sparkle button. Switch to the official X API fallback only if public-profile access is unavailable.
+- Tibo analysis missing: test the public profile and AI provider connections in Settings, then press the sparkle button. If both public routes report a connection failure, check your network or VPN, wait and retry, or switch to the official X API fallback.
 - The widget is missing: use the menu-bar item **Show widget on this display**.
 
 ## License

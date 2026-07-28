@@ -26,11 +26,11 @@ GPT / Codex 額度來自本機 Codex 唯讀 app-server 介面。Claude 的 5 小
 
 Fable 是模型專屬限制，Claude Desktop 可能不會將它寫入本機歷史。如果顯示 `—`，請在設定中點選「連線 Fable 額度」完成一次 Claude Code 官方授權。也可選擇使用 Anthropic Admin API Key 與自訂每月預算。
 
-預設情況下，Tibo 監測只需公開主頁連結 `https://x.com/thsottiaux`，無需 X 開發者憑證。它會讀取 X 的公開嵌入時間軸。若公開頁面發生變化，仍可在進階選項中使用 X API Bearer Token。
+預設情況下，Tibo 監測只需公開主頁連結 `https://x.com/thsottiaux`，無需 X 開發者憑證。它會並行嘗試 X 的公開嵌入時間軸和備用唯讀服務。當兩條公開通道都無法使用時，仍可在進階選項中使用 X API Bearer Token。
 
 可選擇 OpenAI、Claude、Gemini、DeepSeek 或自訂 OpenAI-compatible 介面，輸入必要的 API 資訊，測試連線以載入可用模型，再選擇模型。自訂介面可輸入 `https://api.example.com/v1` 這類 Base URL；LM Studio 等本機服務可使用 `http://localhost`。自動檢測每 2 分鐘執行一次，星光按鈕可立即重新分析最新推文。
 
-在設定中輸入的憑證儲存於 macOS 鑰匙圈。額度歷史、最近三筆任務與最新 Tibo 分析只儲存在本機。只有新檢測到的 Tibo 推文文字會傳送給你選擇的 AI 服務商。
+在設定中輸入的憑證儲存於 macOS 鑰匙圈。開啟設定與測試公開主頁不會讀取已儲存的密鑰；只有你主動測試模型，或檢測到新推文需要 AI 分析時，才會存取鑰匙圈。後台檢測到推文沒有變化時也不會存取。額度歷史、最近三筆任務與最新 Tibo 分析只儲存在本機。只有新檢測到的 Tibo 推文文字會傳送給你選擇的 AI 服務商。
 
 ## 要求與建置
 
@@ -43,6 +43,14 @@ Fable 是模型專屬限制，Claude Desktop 可能不會將它寫入本機歷�
 ```
 
 成品位於 `dist/Agent AI Usage.app`。
+
+## 疑難排解
+
+- GPT 未顯示：開啟 ChatGPT 或 Codex，確認已登入，然後按重新整理。
+- Claude 未顯示：開啟一次 Claude Desktop，讓它更新本機額度歷史。
+- Fable 未顯示：使用「設定 → 連線 Fable 額度」。
+- Tibo 分析未顯示：在設定中測試公開主頁和 AI 模型，然後按星光按鈕。如果兩條公開通道都顯示連線失敗，請檢查網路或 VPN，稍後重試，或改用官方 X API。
+- 小工具不見了：使用選單列項目「在此顯示器顯示小工具」。
 
 ## 授權條款
 

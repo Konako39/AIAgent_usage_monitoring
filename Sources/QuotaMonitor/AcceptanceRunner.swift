@@ -36,6 +36,9 @@ enum AcceptanceRunner {
                 T("tiboResetAlert", language: $0) != "tiboResetAlert"
                     && T("tiboPublicProfile", language: $0) != "tiboPublicProfile"
                     && T("tiboCustomBaseURL", language: $0) != "tiboCustomBaseURL"
+                    && T("tiboPublicSourcesUnavailable", language: $0) != "tiboPublicSourcesUnavailable"
+                    && T("tiboTestingProfile", language: $0) != "tiboTestingProfile"
+                    && T("tiboKeychainOnDemand", language: $0) != "tiboKeychainOnDemand"
             }
         )
 
@@ -71,6 +74,28 @@ enum AcceptanceRunner {
                 try TiboMonitorService.screenName(from: "https://x.com/thsottiaux") == "thsottiaux"
                     && publicTweet.id == "102"
                     && publicTweet.text == "Newest original post"
+            )
+
+            let readerProfile = """
+            [Older](https://x.com/thsottiaux/status/1900000000000000000)
+            [Latest](https://x.com/thsottiaux/status/2000000000000000000)
+            """
+            let readerID = try TiboMonitorService.latestStatusID(
+                in: readerProfile,
+                screenName: "thsottiaux"
+            )
+            let readerTweetData = try JSONSerialization.data(withJSONObject: [
+                "data": [
+                    "title": "Tibo (@thsottiaux) on X: \"A possible usage refresh is coming.\" / X",
+                    "content": ""
+                ]
+            ])
+            let readerTweet = try TiboMonitorService.parseReaderTweet(readerTweetData, id: readerID)
+            record(
+                "The backup public reader finds and parses the newest post",
+                readerID == "2000000000000000000"
+                    && readerTweet.text == "A possible usage refresh is coming."
+                    && readerTweet.createdAt != nil
             )
 
             let analysisJSON = """
