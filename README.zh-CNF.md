@@ -14,6 +14,7 @@
 - 將額度變化歸因到最近的 Codex 或 Claude 任務。
 - 每個服務最多保留三筆最近任務，Claude 會分別顯示每個變化的額度視窗。
 - 監測 Tibo（`@thsottiaux`）的新推文，可交由 OpenAI、Claude、Gemini 或 DeepSeek 判斷是否可能預示 GPT / Codex 額度重置。
+- 支援透過 Base URL、選填 API Key 與動態模型清單連接自訂 OpenAI-compatible 介面。
 - 在 GPT 任務下方顯示最新推文與簡短 AI 結論；可能重置時 GPT 卡片會變成綠色邊框，點擊一次即復原。
 - 位於 Finder 桌面層，一般應用程式視窗會蓋住它。
 - 支援英語、簡體中文、繁體中文和日語。
@@ -25,7 +26,9 @@ GPT / Codex 額度來自本機 Codex 唯讀 app-server 介面。Claude 的 5 小
 
 Fable 是模型專屬限制，Claude Desktop 可能不會將它寫入本機歷史。如果顯示 `—`，請在設定中點選「連線 Fable 額度」完成一次 Claude Code 官方授權。也可選擇使用 Anthropic Admin API Key 與自訂每月預算。
 
-Tibo 監測使用 X 官方 API，因此需要 X API Bearer Token。在設定中輸入該 Token，選擇 OpenAI、Claude、Gemini 或 DeepSeek，輸入對應 API Key，測試連線以載入可用模型，然後選擇模型。自動檢測每 2 分鐘執行一次；重新整理按鈕旁的星光按鈕可立即檢測並重新分析最新推文。
+預設情況下，Tibo 監測只需公開主頁連結 `https://x.com/thsottiaux`，無需 X 開發者憑證。它會讀取 X 的公開嵌入時間軸。若公開頁面發生變化，仍可在進階選項中使用 X API Bearer Token。
+
+可選擇 OpenAI、Claude、Gemini、DeepSeek 或自訂 OpenAI-compatible 介面，輸入必要的 API 資訊，測試連線以載入可用模型，再選擇模型。自訂介面可輸入 `https://api.example.com/v1` 這類 Base URL；LM Studio 等本機服務可使用 `http://localhost`。自動檢測每 2 分鐘執行一次，星光按鈕可立即重新分析最新推文。
 
 在設定中輸入的憑證儲存於 macOS 鑰匙圈。額度歷史、最近三筆任務與最新 Tibo 分析只儲存在本機。只有新檢測到的 Tibo 推文文字會傳送給你選擇的 AI 服務商。
 

@@ -32,7 +32,11 @@ enum AcceptanceRunner {
         )
         record(
             "All four languages include the Tibo reset alert",
-            AppLanguage.allCases.allSatisfy { T("tiboResetAlert", language: $0) != "tiboResetAlert" }
+            AppLanguage.allCases.allSatisfy {
+                T("tiboResetAlert", language: $0) != "tiboResetAlert"
+                    && T("tiboPublicProfile", language: $0) != "tiboPublicProfile"
+                    && T("tiboCustomBaseURL", language: $0) != "tiboCustomBaseURL"
+            }
         )
 
         do {
@@ -47,6 +51,26 @@ enum AcceptanceRunner {
             record(
                 "The latest Tibo post preserves its ID, text, and timestamp",
                 tweet.id == "2002" && tweet.text.contains("reset") && tweet.createdAt != nil
+            )
+
+            let publicTimeline = """
+            <html><body><script id="__NEXT_DATA__" type="application/json">
+            {"props":{"pageProps":{"timeline":{"entries":[
+              {"content":{"tweet":{"id_str":"100","full_text":"Pinned old post","created_at":"Mon Jul 20 09:00:00 +0000 2026","user":{"screen_name":"thsottiaux"}}}},
+              {"content":{"tweet":{"id_str":"102","full_text":"Newest original post","created_at":"Tue Jul 28 09:00:00 +0000 2026","user":{"screen_name":"thsottiaux"}}}},
+              {"content":{"tweet":{"id_str":"103","full_text":"RT @someone: ignore this","created_at":"Tue Jul 28 10:00:00 +0000 2026","user":{"screen_name":"thsottiaux"},"retweeted_status":{}}}}
+            ]}}}}
+            </script></body></html>
+            """
+            let publicTweet = try TiboMonitorService.parseSyndicationTimeline(
+                Data(publicTimeline.utf8),
+                screenName: "thsottiaux"
+            )
+            record(
+                "A public X profile link works without a Bearer Token",
+                try TiboMonitorService.screenName(from: "https://x.com/thsottiaux") == "thsottiaux"
+                    && publicTweet.id == "102"
+                    && publicTweet.text == "Newest original post"
             )
 
             let analysisJSON = """
@@ -77,13 +101,33 @@ enum AcceptanceRunner {
                 (.openAI, ["data": [["id": "gpt-5.6-luna"]]], "gpt-5.6-luna"),
                 (.anthropic, ["data": [["id": "claude-sonnet-4-6", "display_name": "Claude Sonnet 4.6"]]], "claude-sonnet-4-6"),
                 (.gemini, ["models": [["name": "models/gemini-3.5-flash", "displayName": "Gemini 3.5 Flash", "supportedGenerationMethods": ["generateContent"]]]], "gemini-3.5-flash"),
-                (.deepSeek, ["data": [["id": "deepseek-v4-flash"]]], "deepseek-v4-flash")
+                (.deepSeek, ["data": [["id": "deepseek-v4-flash"]]], "deepseek-v4-flash"),
+                (.openAICompatible, ["data": [["id": "third-party-model"]]], "third-party-model")
             ]
             let allModelListsParse = try modelFixtures.allSatisfy { provider, fixture, expected in
                 let data = try JSONSerialization.data(withJSONObject: fixture)
                 return try LLMService.parseModels(provider: provider, data: data).contains(where: { $0.id == expected })
             }
-            record("All four AI provider model lists parse correctly", allModelListsParse)
+            record("Built-in and custom AI provider model lists parse correctly", allModelListsParse)
+
+            let normalizedRemote = try LLMService.normalizedOpenAICompatibleBaseURL(
+                "https://gateway.example.com/v1/chat/completions"
+            )
+            let normalizedLocal = try LLMService.normalizedOpenAICompatibleBaseURL(
+                "http://localhost:1234/v1/"
+            )
+            var rejectedInsecureRemote = false
+            do {
+                _ = try LLMService.normalizedOpenAICompatibleBaseURL("http://gateway.example.com/v1")
+            } catch TiboMonitorError.insecureCustomBaseURL {
+                rejectedInsecureRemote = true
+            }
+            record(
+                "Custom OpenAI-compatible URLs are normalized and protected",
+                normalizedRemote.absoluteString == "https://gateway.example.com/v1"
+                    && normalizedLocal.absoluteString == "http://localhost:1234/v1"
+                    && rejectedInsecureRemote
+            )
         } catch {
             record("Tibo fixture parsing", false, error.localizedDescription)
         }

@@ -14,6 +14,7 @@ GPT / Codex と Claude の使用量を同時に監視する、macOS ネイティ
 - 使用量の変化を最近の Codex または Claude タスクに関連付け。
 - 各サービスで最大 3 件の最近タスクを保存し、Claude は変化した各使用量ウィンドウを個別に表示。
 - Tibo（`@thsottiaux`）の新しいポストを監視し、OpenAI、Claude、Gemini、DeepSeek のいずれかで GPT / Codex 使用量のリセットを示唆するか判定。
+- Base URL、任意の API Key、動的なモデル一覧でカスタム OpenAI-compatible エンドポイントに対応。
 - GPT タスクの下に最新ポストと簡潔な AI 判定を表示。リセットの可能性があると GPT カードが緑色になり、1 回クリックすると元に戻ります。
 - Finder のデスクトップレベルに配置され、通常のアプリウィンドウの背面に表示。
 - 英語、簡体中国語、繁体中国語、日本語に対応。
@@ -25,7 +26,9 @@ GPT / Codex はローカル Codex の読み取り専用 app-server インター�
 
 Fable はモデル固有の上限で、Claude Desktop がローカル履歴に保存しない場合があります。`—` の場合は、設定の「Fable 使用量を接続」で一度だけ Claude Code 公式認証を行います。
 
-Tibo 監視は X の公式 API を使用するため、X API Bearer Token が必要です。設定でその Token を入力し、OpenAI、Claude、Gemini、DeepSeek から選択して対応する API Key を追加し、接続テストで利用可能なモデルを取得してから 1 つ選択します。自動確認は 2 分ごとに実行され、更新ボタン横のスパークルボタンで最新ポストをすぐに再解析できます。
+デフォルトの Tibo 監視は公開プロフィール URL `https://x.com/thsottiaux` だけで使用でき、X 開発者認証情報は不要です。X の公開埋め込みタイムラインを読み取ります。公開ページの仕様が変わった場合は、詳細設定で X API Bearer Token を使用できます。
+
+OpenAI、Claude、Gemini、DeepSeek、またはカスタム OpenAI-compatible エンドポイントを選択し、必要な API 情報を入力して接続テストからモデルを選びます。カスタムエンドポイントは `https://api.example.com/v1` のような Base URL に対応し、LM Studio などのローカルサービスは `http://localhost` を使用できます。自動確認は 2 分ごとに実行され、スパークルボタンで最新ポストをすぐに再解析できます。
 
 設定で入力した認証情報は macOS キーチェーンに保存されます。使用量履歴、最近 3 件のタスク、最新の Tibo 分析は Mac 内にのみ保存され、新しく検出された Tibo のポスト本文だけが選択した AI プロバイダーに送信されます。
 

@@ -1699,14 +1699,17 @@ struct SettingsView: View {
     @AppStorage("anthropicMonthlyBudget") private var monthlyBudget = 100.0
     @AppStorage("appLanguage") private var appLanguageRaw = AppLanguage.english.rawValue
     @AppStorage("tiboMonitoringEnabled") private var tiboMonitoringEnabled = false
+    @AppStorage(TiboMonitorPersistence.sourceKey) private var tiboSourceRaw = TiboPostSource.publicProfile.rawValue
+    @AppStorage(TiboMonitorPersistence.profileURLKey) private var tiboProfileURL = TiboMonitorPersistence.defaultProfileURL
     @AppStorage("tiboLLMProvider") private var tiboProviderRaw = LLMProvider.openAI.rawValue
     @State private var oauthToken = ""
     @State private var adminKey = ""
     @State private var xBearerToken = ""
     @State private var llmAPIKey = ""
+    @State private var customLLMBaseURL = ""
     @State private var llmModels: [LLMModelOption] = []
     @State private var selectedLLMModel = ""
-    @State private var isTestingX = false
+    @State private var isTestingSource = false
     @State private var isLoadingModels = false
     @State private var savedMessage = ""
 
@@ -1716,6 +1719,10 @@ struct SettingsView: View {
 
     private var selectedProvider: LLMProvider {
         LLMProvider(rawValue: tiboProviderRaw) ?? .openAI
+    }
+
+    private var selectedTiboSource: TiboPostSource {
+        TiboPostSource(rawValue: tiboSourceRaw) ?? .publicProfile
     }
 
     var body: some View {
@@ -1743,28 +1750,30 @@ struct SettingsView: View {
             Section(T("tiboSection", language: language)) {
                 Toggle(T("tiboAutomaticMonitoring", language: language), isOn: $tiboMonitoringEnabled)
 
-                SecureField(T("tiboXTokenPlaceholder", language: language), text: $xBearerToken)
-                HStack {
-                    Button(T("tiboTestX", language: language)) {
-                        let token = xBearerToken.trimmingCharacters(in: .whitespacesAndNewlines)
-                        isTestingX = true
-                        savedMessage = ""
-                        Task {
-                            defer { isTestingX = false }
-                            do {
-                                let id = try await TiboMonitorService.testXConnection(token: token)
-                                Keychain.save(token, key: "tibo.xBearerToken")
-                                UserDefaults.standard.set(id, forKey: TiboMonitorPersistence.xUserIDKey)
-                                savedMessage = T("tiboXConnected", language: language)
-                                activateTiboIfReady()
-                            } catch {
-                                savedMessage = error.localizedDescription
-                            }
-                        }
-                    }
-                    .disabled(isTestingX || xBearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Picker(T("tiboPostSource", language: language), selection: $tiboSourceRaw) {
+                    Text(T("tiboPublicProfile", language: language)).tag(TiboPostSource.publicProfile.rawValue)
+                    Text(T("tiboOfficialAPI", language: language)).tag(TiboPostSource.officialAPI.rawValue)
+                }
 
-                    Link(T("tiboOpenXDeveloper", language: language), destination: URL(string: "https://developer.x.com/")!)
+                if selectedTiboSource == .publicProfile {
+                    TextField(T("tiboProfileURLPlaceholder", language: language), text: $tiboProfileURL)
+                    Button(T("tiboTestProfile", language: language)) {
+                        testTiboSource()
+                    }
+                    .disabled(isTestingSource || tiboProfileURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Text(T("tiboPublicProfileHelp", language: language))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    SecureField(T("tiboXTokenPlaceholder", language: language), text: $xBearerToken)
+                    HStack {
+                        Button(T("tiboTestX", language: language)) {
+                            testTiboSource()
+                        }
+                        .disabled(isTestingSource || xBearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                        Link(T("tiboOpenXDeveloper", language: language), destination: URL(string: "https://developer.x.com/")!)
+                    }
                 }
 
                 Picker(T("tiboModelProvider", language: language), selection: $tiboProviderRaw) {
@@ -1773,17 +1782,39 @@ struct SettingsView: View {
                     }
                 }
 
+                if selectedProvider == .openAICompatible {
+                    TextField(T("tiboCustomBaseURL", language: language), text: $customLLMBaseURL)
+                    Text(T("tiboCustomBaseURLHelp", language: language))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 SecureField(T("tiboLLMKeyPlaceholder", language: language), text: $llmAPIKey)
                 Button(T("tiboTestAndFetchModels", language: language)) {
                     let provider = selectedProvider
                     let key = llmAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let baseURL = provider == .openAICompatible
+                        ? customLLMBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                        : nil
                     isLoadingModels = true
                     savedMessage = ""
                     Task {
                         defer { isLoadingModels = false }
                         do {
-                            let models = try await LLMService.listModels(provider: provider, apiKey: key)
+                            let models = try await LLMService.listModels(
+                                provider: provider,
+                                apiKey: key,
+                                baseURL: baseURL
+                            )
                             Keychain.save(key, key: provider.keychainKey)
+                            if let baseURL {
+                                let normalized = try LLMService.normalizedOpenAICompatibleBaseURL(baseURL)
+                                customLLMBaseURL = normalized.absoluteString
+                                UserDefaults.standard.set(
+                                    normalized.absoluteString,
+                                    forKey: provider.baseURLDefaultsKey
+                                )
+                            }
                             llmModels = models
                             if !models.contains(where: { $0.id == selectedLLMModel }) {
                                 selectedLLMModel = models[0].id
@@ -1799,7 +1830,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-                .disabled(isLoadingModels || llmAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(isLoadingModels || modelConnectionFieldsMissing)
 
                 if !selectedLLMModel.isEmpty {
                     Picker(T("tiboModel", language: language), selection: $selectedLLMModel) {
@@ -1898,6 +1929,9 @@ struct SettingsView: View {
             loadLLMConfiguration()
             savedMessage = ""
         }
+        .onChange(of: tiboSourceRaw) { _, _ in
+            savedMessage = ""
+        }
         .onChange(of: selectedLLMModel) { _, model in
             guard !model.isEmpty else { return }
             UserDefaults.standard.set(model, forKey: selectedProvider.modelDefaultsKey)
@@ -1910,9 +1944,47 @@ struct SettingsView: View {
         return [LLMModelOption(id: selectedLLMModel, displayName: selectedLLMModel)] + llmModels
     }
 
+    private var modelConnectionFieldsMissing: Bool {
+        if selectedProvider == .openAICompatible {
+            return customLLMBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return llmAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func testTiboSource() {
+        let source = selectedTiboSource
+        let profileURL = tiboProfileURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = xBearerToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        isTestingSource = true
+        savedMessage = ""
+        Task {
+            defer { isTestingSource = false }
+            do {
+                switch source {
+                case .publicProfile:
+                    let tweet = try await TiboMonitorService.testPublicProfile(profileURL: profileURL)
+                    tiboProfileURL = profileURL
+                    savedMessage = String(
+                        format: T("tiboProfileConnected", language: language),
+                        String(tweet.text.prefix(42))
+                    )
+                case .officialAPI:
+                    let id = try await TiboMonitorService.testXConnection(token: token)
+                    Keychain.save(token, key: "tibo.xBearerToken")
+                    UserDefaults.standard.set(id, forKey: TiboMonitorPersistence.xUserIDKey)
+                    savedMessage = T("tiboXConnected", language: language)
+                }
+                activateTiboIfReady()
+            } catch {
+                savedMessage = error.localizedDescription
+            }
+        }
+    }
+
     private func loadLLMConfiguration() {
         let provider = selectedProvider
         llmAPIKey = Keychain.read(provider.keychainKey) ?? ""
+        customLLMBaseURL = UserDefaults.standard.string(forKey: provider.baseURLDefaultsKey) ?? ""
         selectedLLMModel = UserDefaults.standard.string(forKey: provider.modelDefaultsKey) ?? ""
         llmModels = selectedLLMModel.isEmpty
             ? []
@@ -1921,8 +1993,16 @@ struct SettingsView: View {
 
     private func activateTiboIfReady() {
         let provider = selectedProvider
-        guard Keychain.read("tibo.xBearerToken")?.isEmpty == false,
-              Keychain.read(provider.keychainKey)?.isEmpty == false,
+        let sourceReady = selectedTiboSource == .publicProfile
+            ? (try? TiboMonitorService.screenName(from: tiboProfileURL)) != nil
+            : Keychain.read("tibo.xBearerToken")?.isEmpty == false
+        let providerKeyReady = provider.allowsEmptyAPIKey
+            || Keychain.read(provider.keychainKey)?.isEmpty == false
+        let providerBaseURLReady = provider != .openAICompatible
+            || UserDefaults.standard.string(forKey: provider.baseURLDefaultsKey)?.isEmpty == false
+        guard sourceReady,
+              providerKeyReady,
+              providerBaseURLReady,
               UserDefaults.standard.string(forKey: provider.modelDefaultsKey)?.isEmpty == false else {
             return
         }
