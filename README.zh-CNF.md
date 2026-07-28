@@ -4,7 +4,7 @@
 
 一個原生 macOS 桌面小工具，用來同時監控 GPT / Codex 與 Claude 額度，不會擋住正在使用的視窗。
 
-![Agent AI Usage](docs/agent-ai-usage.png)
+![Agent AI Usage 顯示可能的 GPT 額度重置提示](docs/agent-ai-usage-reset-watch.png)
 
 ## 功能
 

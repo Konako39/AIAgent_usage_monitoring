@@ -4,7 +4,7 @@ English | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-CNF.md) | [
 
 A native macOS desktop widget for monitoring GPT / Codex and Claude usage without keeping a dashboard in front of your work.
 
-![Agent AI Usage](docs/agent-ai-usage.png)
+![Agent AI Usage showing a possible GPT quota reset alert](docs/agent-ai-usage-reset-watch.png)
 
 ## Features
 

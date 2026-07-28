@@ -4,7 +4,7 @@
 
 一个原生 macOS 桌面小组件，用来同时监控 GPT / Codex 与 Claude 额度，不会遮挡正在使用的窗口。
 
-![Agent AI Usage](docs/agent-ai-usage.png)
+![Agent AI Usage 显示可能的 GPT 额度重置提示](docs/agent-ai-usage-reset-watch.png)
 
 ## 功能
 

@@ -4,7 +4,7 @@
 
 GPT / Codex と Claude の使用量を同時に監視する、macOS ネイティブのデスクトップウィジェットです。通常のアプリウィンドウの背面に表示されます。
 
-![Agent AI Usage](docs/agent-ai-usage.png)
+![GPT 使用量リセットの可能性を表示する Agent AI Usage](docs/agent-ai-usage-reset-watch.png)
 
 ## 機能
 
