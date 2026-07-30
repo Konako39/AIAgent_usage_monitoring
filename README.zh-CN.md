@@ -13,7 +13,7 @@
 - 每 30 秒刷新并重新检测服务。
 - 将额度变化归因到最近的 Codex 或 Claude 任务。
 - 每家最多保留三条最近任务，Claude 会分别显示每个变化的额度窗口。
-- 监测 Tibo（`@thsottiaux`）的新推文，可交给 OpenAI、Claude、Gemini 或 DeepSeek 判断是否可能预示 GPT / Codex 额度重置。
+- 监测 Tibo（`@thsottiaux`）的新推文，将当前推文、一条前文和最多三条高互动公开回复交给 OpenAI、Claude、Gemini 或 DeepSeek，综合判断明示或隐性的 GPT / Codex 额度重置信号。
 - 支持通过 Base URL、可选 API Key 和动态模型列表连接自定义 OpenAI-compatible 接口。
 - 在 GPT 任务下方显示最新推文和简洁 AI 结论；可能重置时 GPT 卡片变为绿色边框，点击一次即复原。
 - 可为 Tibo 和 AI 流量启用自定义 HTTP/Mixed 代理，默认填入 Clash 常见的 `127.0.0.1:7890`，端口可编辑并可测试连接。
@@ -31,7 +31,7 @@ Fable 是模型专属限制，Claude Desktop 可能不会将它写入本地历�
 
 可选择 OpenAI、Claude、Gemini、DeepSeek 或自定义 OpenAI-compatible 接口，输入必要的 API 信息，测试连接以加载可用模型，然后选择模型。自定义接口可填写 `https://api.example.com/v1` 这样的 Base URL；LM Studio 等本机服务可使用 `http://localhost`。自动检测每 2 分钟执行一次，星光按钮可立即重新分析最新推文。
 
-在设置中填入的凭证保存于 macOS 钥匙串。打开设置和测试公开主页不会读取已保存的密钥；只有你主动测试模型，或检测到新推文需要 AI 分析时，才会访问钥匙串。后台检测到推文没有变化时也不会访问。额度历史、最近三条任务和最新 Tibo 分析只保存在本机。只有新检测到的 Tibo 推文文本会发送给你选择的 AI 服务商。
+在设置中填入的凭证保存于 macOS 钥匙串。打开设置和测试公开主页不会读取已保存的密钥；只有你主动测试模型，或检测到新推文需要 AI 分析时，才会访问钥匙串。后台检测到推文没有变化时也不会访问。额度历史、最近三条任务和最新 Tibo 分析只保存在本机。新推文、最多一条 Tibo 前文和三条高互动公开回复会发送给你选择的 AI 服务商。
 
 ## 要求与构建
 

@@ -13,7 +13,7 @@ A native macOS desktop widget for monitoring GPT / Codex and Claude usage withou
 - Refreshes and re-detects services every 30 seconds.
 - Attributes usage changes to the latest Codex or Claude task.
 - Keeps up to three recent tasks per provider; Claude shows every changed usage window separately.
-- Watches Tibo (`@thsottiaux`) for new posts and can ask OpenAI, Claude, Gemini, or DeepSeek whether they may signal a GPT / Codex quota reset.
+- Watches Tibo (`@thsottiaux`) for new posts and asks OpenAI, Claude, Gemini, or DeepSeek to judge explicit and indirect GPT / Codex quota-reset signals using the current post, one prior post, and up to three high-engagement public replies.
 - Also supports custom OpenAI-compatible endpoints by Base URL, optional API key, and dynamically loaded model list.
 - Keeps the latest post and a concise AI verdict below GPT tasks; a possible reset turns the GPT card green until you click it once.
 - Supports an optional HTTP/Mixed proxy for Tibo and AI traffic, preset to Clash's common `127.0.0.1:7890` address with an editable port and connection test.
@@ -31,7 +31,7 @@ By default, Tibo monitoring only needs the public profile link `https://x.com/th
 
 Choose OpenAI, Claude, Gemini, DeepSeek, or Custom OpenAI-compatible, enter the required API information, test the connection to load available models, and select one. Custom endpoints accept an API Base URL such as `https://api.example.com/v1`; local services such as LM Studio may use `http://localhost`. Automatic checks run every two minutes; the sparkle button next to Refresh checks immediately and reanalyzes the latest post.
 
-Credentials entered in Settings are stored in macOS Keychain. Opening Settings and testing the public profile never reads saved secrets; Keychain is accessed only when you explicitly test a model or when a newly detected post needs AI analysis. An unchanged background check does not access it. Usage history, the three most recent task records, and the latest Tibo analysis stay on the Mac. Only the text of a newly detected Tibo post is sent to the AI provider you select.
+Credentials entered in Settings are stored in macOS Keychain. Opening Settings and testing the public profile never reads saved secrets; Keychain is accessed only when you explicitly test a model or when a newly detected post needs AI analysis. An unchanged background check does not access it. Usage history, the three most recent task records, and the latest Tibo analysis stay on the Mac. The newly detected Tibo post, at most one prior Tibo post, and up to three high-engagement public replies are sent to the AI provider you select.
 
 ## Requirements
 

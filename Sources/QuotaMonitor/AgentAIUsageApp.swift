@@ -97,6 +97,7 @@ final class QuotaStore: ObservableObject {
     private let claudeFetcher: ProviderFetcher
     private let tiboFetcher: TiboFetcher
     private var pendingTiboAnalysis: TiboAnalysis?
+    private var providerFailureCounts: [String: Int] = [:]
 
     init(
         refreshInterval: TimeInterval = QuotaStore.defaultRefreshInterval,
@@ -204,10 +205,19 @@ final class QuotaStore: ObservableObject {
 
     func apply(_ poll: ProviderPoll, provider: String, now: Date = Date()) {
         let snapshot = poll.snapshot
+        if !snapshot.connected {
+            let failures = (providerFailureCounts[provider] ?? 0) + 1
+            providerFailureCounts[provider] = failures
+            if provider == "gpt", gpt.connected, failures < 3 {
+                return
+            }
+            if provider == "gpt" { gpt = snapshot } else { claude = snapshot }
+            return
+        }
+        providerFailureCounts[provider] = 0
         defer {
             if provider == "gpt" { gpt = snapshot } else { claude = snapshot }
         }
-        guard snapshot.connected else { return }
 
         let current = baselineValues(for: snapshot)
         let key = "lastQuotaLimits.\(provider)"
@@ -363,37 +373,52 @@ enum MonitorError: LocalizedError {
 
 enum QuotaService {
     static func fetchCodex() async -> ProviderPoll {
-        do {
-            let payload = try await Task.detached(priority: .utility) {
-                try runCodexPollRequest()
-            }.value
-            let root = payload.rateLimits
-            guard
-                let result = root["result"] as? [String: Any],
-                let limits = result["rateLimits"] as? [String: Any],
-                let primary = limits["primary"] as? [String: Any],
-                let used = number(primary["usedPercent"])
-            else { throw MonitorError.malformedResponse }
-
-            let remaining = max(0, min(100, 100 - used))
-            let minutes = number(primary["windowDurationMins"]) ?? 0
-            let period = minutes >= 10000 ? T("weeklyLimit") : (minutes >= 1400 ? T("dailyLimit") : T("currentLimit"))
-            let reset = number(primary["resetsAt"]).map {
-                String(format: T("resetAt"), formatReset(Date(timeIntervalSince1970: $0)))
-            } ?? T("codexConnected")
-            return ProviderPoll(
-                snapshot: .init(
-                    remaining: remaining,
-                    detail: period,
-                    resetText: reset,
-                    connected: true,
-                    error: nil
-                ),
-                taskName: payload.taskName
-            )
-        } catch {
-            return ProviderPoll(snapshot: .failed(error.localizedDescription), taskName: nil)
+        var lastError: Error = MonitorError.malformedResponse
+        for attempt in 0..<2 {
+            do {
+                let payload = try await Task.detached(priority: .utility) {
+                    try runCodexPollRequest()
+                }.value
+                return ProviderPoll(
+                    snapshot: try parseCodexRateLimits(payload.rateLimits),
+                    taskName: payload.taskName
+                )
+            } catch {
+                lastError = error
+                if attempt == 0 {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                }
+            }
         }
+        return ProviderPoll(snapshot: .failed(lastError.localizedDescription), taskName: nil)
+    }
+
+    static func parseCodexRateLimits(_ root: [String: Any]) throws -> QuotaSnapshot {
+        guard let result = root["result"] as? [String: Any] else {
+            throw MonitorError.malformedResponse
+        }
+        let direct = result["rateLimits"] as? [String: Any]
+        let mapped = result["rateLimitsByLimitId"] as? [String: Any]
+        let preferred = (mapped?["codex"] as? [String: Any])
+            ?? mapped?.values.compactMap { $0 as? [String: Any] }.first(where: { $0["primary"] != nil })
+        guard let limits = direct ?? preferred,
+              let primary = limits["primary"] as? [String: Any],
+              let used = number(primary["usedPercent"]) else {
+            throw MonitorError.malformedResponse
+        }
+        let remaining = max(0, min(100, 100 - used))
+        let minutes = number(primary["windowDurationMins"]) ?? 0
+        let period = minutes >= 10000 ? T("weeklyLimit") : (minutes >= 1400 ? T("dailyLimit") : T("currentLimit"))
+        let reset = number(primary["resetsAt"]).map {
+            String(format: T("resetAt"), formatReset(Date(timeIntervalSince1970: $0)))
+        } ?? T("codexConnected")
+        return .init(
+            remaining: remaining,
+            detail: period,
+            resetText: reset,
+            connected: true,
+            error: nil
+        )
     }
 
     static func fetchClaude() async -> ProviderPoll {
@@ -656,11 +681,13 @@ enum QuotaService {
         process.standardError = errors
 
         let semaphore = DispatchSemaphore(value: 0)
+        let threadSemaphore = DispatchSemaphore(value: 0)
         let lock = NSLock()
         var buffer = Data()
         var rateResponse: [String: Any]?
         var threadResponse: [String: Any]?
         var didSignal = false
+        var didSignalThread = false
 
         output.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
@@ -676,13 +703,26 @@ enum QuotaService {
                     if id == 3 { threadResponse = object }
                 }
             }
-            let ready = rateResponse != nil && threadResponse != nil && !didSignal
+            let ready = rateResponse != nil && !didSignal
+            let threadReady = threadResponse != nil && !didSignalThread
             if ready { didSignal = true }
+            if threadReady { didSignalThread = true }
             lock.unlock()
             if ready { semaphore.signal() }
+            if threadReady { threadSemaphore.signal() }
+        }
+
+        errors.fileHandleForReading.readabilityHandler = { handle in
+            _ = handle.availableData
         }
 
         try process.run()
+        defer {
+            output.fileHandleForReading.readabilityHandler = nil
+            errors.fileHandleForReading.readabilityHandler = nil
+            try? input.fileHandleForWriting.close()
+            if process.isRunning { process.terminate() }
+        }
         let messages = [
             #"{"method":"initialize","id":1,"params":{"clientInfo":{"name":"agent-ai-usage","title":"Agent AI Usage","version":"1.1.0"}}}"#,
             #"{"method":"initialized","params":{}}"#,
@@ -692,9 +732,8 @@ enum QuotaService {
         input.fileHandleForWriting.write(Data(messages.utf8))
 
         let result = semaphore.wait(timeout: .now() + 15)
-        output.fileHandleForReading.readabilityHandler = nil
-        if process.isRunning { process.terminate() }
         guard result == .success else { throw MonitorError.timedOut }
+        _ = threadSemaphore.wait(timeout: .now() + 0.35)
         lock.lock()
         defer { lock.unlock() }
         guard let rateResponse else { throw MonitorError.malformedResponse }
@@ -1414,6 +1453,13 @@ private struct TiboInsightView: View {
                     HStack(spacing: 4) {
                         Text("\(analysis.provider.displayName) · \(analysis.model)")
                         Spacer()
+                        if (analysis.previousPostCount ?? 0) + (analysis.hotReplyCount ?? 0) > 0 {
+                            Text(String(
+                                format: T("tiboContextSummary", language: language),
+                                analysis.previousPostCount ?? 0,
+                                analysis.hotReplyCount ?? 0
+                            ))
+                        }
                         if alertActive {
                             Text(T("tiboTapToDismiss", language: language))
                                 .foregroundStyle(.green)
